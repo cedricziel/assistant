@@ -2,7 +2,7 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 
 ## 1. PR 1 — Store and versions
 
-- [ ] 1.1 ADR `docs/adr/adr-0017-sandboxed-artifacts.md`: space-scoped artifacts, full-content versions, opaque-origin CSP sandbox, signed render URLs
+- [ ] 1.1 ADR `docs/adr/adr-0017-sandboxed-artifacts.md`: space-scoped artifacts, full-content versions, opaque-origin CSP sandbox filled from an authenticated render route
 - [ ] 1.2 Failing migration test for `migrations/046_artifacts.sql` (D1 tables, `CHECK` on `kind` and `author_kind`, PK on `(artifact_id, version)`) (confirm RED); write the migration and register it in `crates/storage/src/lib.rs`; GREEN
 - [ ] 1.3 Add `Artifact`, `ArtifactKind`, `ArtifactVersion`, `ArtifactConflict` types in `crates/core`; failing serde round-trip tests first
 - [ ] 1.4 Failing contract tests in `crates/storage/tests/contract/` for `ArtifactStore`: create → v1, write with matching `base_version` → v+1, stale `base_version` → conflict carrying latest, restore sets `restored_from`, 5 MiB cap, list by space, delete cascades versions and comments (confirm RED)
@@ -26,14 +26,14 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 
 ## 4. PR 4 — Sandbox and slides
 
-- [ ] 4.1 Failing tests for render-URL signing: valid, expired, tampered version, wrong artifact, and a viewer whose grant was removed between issue and redemption (confirm RED); implement HMAC over `{id, version, sub, exp}` (2 minutes) keyed from `jwt_secret`; GREEN
-- [ ] 4.2 Failing route tests for `GET /artifact-content/{id}/{version}`: 404 without signature, role re-resolved per request, link token revalidated per request (revoked link or disabled policy → 404 at once), exact CSP header (sandbox with `allow-scripts` only, `connect-src`/`form-action`/`base-uri`/`object-src` `'none'`), `nosniff`, `no-referrer`, `private, no-store` (confirm RED); implement; GREEN
-- [ ] 4.3 Failing tests for `[artifacts]` in `server.toml`: defaults, empty allowlist, `content_origin` makes main-origin requests 404 (confirm RED); implement config and host check; GREEN
+- [ ] 4.1 Failing route tests for `GET /api/artifacts/{id}/content?format=html`: `html` returns stored markup, `slides` renders the deck, unsupported `format` is 400, and a viewer whose grant was removed between loads gets 404 (confirm RED); implement the render route; GREEN
+- [ ] 4.2 Failing tests for the document wrapper: exact `<meta>` CSP (default-src none, inline-only scripts plus allowlist, data:/blob: media, `connect-src`/`form-action`/`base-uri`/`object-src` `'none'`), bridge injected, and `/a/{token}/content` sending the same policy as headers with `nosniff`, `no-referrer`, `no-store` (confirm RED); implement; GREEN
+- [ ] 4.3 Failing tests for `[artifacts] cdn_allowlist` in `server.toml`: default allowlist, empty allowlist blocks CDN scripts (confirm RED); implement config; GREEN
 - [ ] 4.4 Failing tests for the slides renderer: frontmatter parsing, `---` splitting (not inside fenced code), three slides → three sections, print CSS and bridge script present (confirm RED); implement with `pulldown-cmark` and an embedded template; GREEN
 - [ ] 4.5 Render `markdown`/`code`/`data` to HTML for link views; tests first
 - [ ] 4.6 Playwright test: an `html` artifact's `fetch('/api/...')` is blocked and `document.cookie` is empty inside the frame
 - [ ] 4.7 Failing tests for the injected bridge: a static `html` artifact gets the script before `</body>` (or at the end), stored versions are unchanged, and only `selection`/`open-link` messages are posted (confirm RED); implement the injection and anchor click listener; GREEN
-- [ ] 4.8 `make dump-openapi` for `POST /render-url`; `make generate-flutter-client`
+- [ ] 4.8 `make dump-openapi` for `GET /api/artifacts/{id}/content`; `make generate-flutter-client`
 
 ## 5. PR 5 — Sharing
 
@@ -59,7 +59,7 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 
 - [ ] 7.1 Spike: confirm `webview_flutter` loads a sandboxed page on macOS and iOS; add the dependency; record the outcome in the PR
 - [ ] 7.2 `ArtifactRepository` + `ArtifactViewModel` with unit tests for loading, success, error and empty
-- [ ] 7.3 `ArtifactFrame` (web `HtmlElementView` iframe with `sandbox`, webview on Apple) with a widget test; render-URL refresh on expiry, test first
+- [ ] 7.3 `ArtifactFrame` (web `<iframe srcdoc>` with `sandbox`, `loadHtmlString` plus a navigation delegate on Apple) with a widget test; refetch on permission change, test first
 - [ ] 7.4 `ArtifactViewer` for native kinds with widget tests per kind
 - [ ] 7.5 `ArtifactCard` in the message list and the side panel / full-screen route at the 900 px breakpoint, with widget tests; routes `/artifacts`, `/artifacts/:id`
 - [ ] 7.6 Update Playwright screenshot baselines for chat and add viewer baselines; note the visual diff in the PR

@@ -8,19 +8,21 @@ artifacts appear in chat and on messenger platforms.
 ### Requirement: The app renders every artifact kind
 
 The app SHALL render `markdown`, `code` and `data` natively, and `html` and
-`slides` in a sandboxed frame loading a signed render URL: an `<iframe>` whose
-`sandbox` attribute grants only `allow-scripts` on web, and a webview on macOS
-and iOS. It SHALL show loading, error and empty states.
+`slides` in a sandboxed frame filled from the render route: an `<iframe srcdoc>`
+whose `sandbox` attribute grants only `allow-scripts` on web, and a webview
+loading the document string on macOS and iOS, with a navigation delegate that
+refuses every navigation. It SHALL show loading, error and empty states.
 
 #### Scenario: Slides in the app
 
 - **WHEN** a user opens a `slides` artifact
 - **THEN** the deck appears in the frame and arrow keys move between slides
 
-#### Scenario: Render URL expires while open
+#### Scenario: Access removed while the frame is open
 
-- **WHEN** the frame reloads after its URL has expired
-- **THEN** the app fetches a new render URL and reloads without an error
+- **WHEN** the frame reloads after the viewer lost access to the artifact
+- **THEN** the app shows the access error from the render route instead of
+  content
 
 ### Requirement: People with edit can change content and resolve conflicts
 

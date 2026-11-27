@@ -17,12 +17,14 @@ them heuristically, and ruled out HTML and co-editing.
 - **Personas use explicit tools**: `artifact-create`, `artifact-read`,
   `artifact-update`, `artifact-edit` (find/replace), `artifact-list`,
   `artifact-comment`. No heuristic detection.
-- **HTML and slides render in a sandbox.** Content is served with a CSP
-  `sandbox` directive (opaque origin, no access to the app's cookies, storage
-  or API), a script/style CDN allowlist, and no network access. An optional
-  separate content origin adds defence in depth. Slides are Markdown split on
-  `---`, rendered server-side into a self-contained deck with keyboard
-  navigation and a print-to-PDF layout.
+- **HTML and slides render in a sandbox.** The app fills a sandboxed frame with
+  a document from an authenticated route — no signed content URL — so a page
+  gets an opaque origin, no access to the app's cookies, storage or API, no
+  network channel (no fetch, forms or popups), and scripts and styles only from
+  a CDN allowlist. Slides are Markdown split on `---`, rendered server-side into
+  a self-contained deck with keyboard navigation and a print-to-PDF layout. A
+  page can still navigate its own frame to an external URL on the web, which the
+  design records as an accepted residual risk.
 - **Per-artifact sharing.** Roles `view`, `comment`, `edit`, `manage`. Space
   roles give a baseline; per-artifact grants add org users outside the space.
   Share links come in two kinds: `org` (any signed-in org member) and `public`
@@ -62,8 +64,9 @@ None.
 
 - `migrations/046_artifacts.sql` (space.db), `migrations/org/010_artifact_shares.sql`.
 - `crates/core`, `crates/storage`, `crates/tool-executor`, `crates/runtime`
-  (orchestrator event), `crates/web-ui` (routes, public `/a/{token}`, content
-  route, CSP), `crates/mcp-server`, `crates/interfaces` (link formatting).
+  (orchestrator event), `crates/web-ui` (routes, render route, public
+  `/a/{token}` pages, CSP), `crates/mcp-server`, `crates/interfaces` (link
+  formatting).
 - `openapi.json`, regenerated Dart client, new `app/lib/features/artifacts/`,
   `webview_flutter` for macOS/iOS. **Visual change:** chat gains an artifact
   card and side panel; screenshot baselines will move.
@@ -71,5 +74,5 @@ None.
 
 ## Documentation
 
-Needed: a user guide (`docs/artifacts.md`) and operator docs for the content
-origin, CDN allowlist and public-link policy.
+Needed: a user guide (`docs/artifacts.md`) and operator docs for the CDN
+allowlist and public-link policy.

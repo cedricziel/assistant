@@ -121,41 +121,45 @@ artifact (durable, shareable output) and that HTML must be self-contained.
 
 ### D4. Sandboxed serving (`artifact-sandbox`)
 
-Rendered content is served at `GET /artifact-content/{id}/{version}` outside
-`/api`. An iframe cannot send an `Authorization` header, so access is granted by
-a short-lived signature: `POST /api/artifacts/{id}/render-url` (authenticated)
-returns a URL carrying `sub` (the viewer's user id), `exp` (2 minutes) and an
-HMAC-SHA256 `sig` over `{id, version, sub, exp}` keyed from `jwt_secret`. The
-content route resolves `sub`'s effective role (D5) again on every request, so a
-removed grant or a lost space role returns `404` on the next load instead of
-waiting for `exp`. Signed URLs are never issued for link views: share links call
-the same route with their token, and the route revalidates the token hash, the
-policy and the expiry per request exactly as `/a/{token}` does. Revoking a link
-or turning the policy off therefore takes effect immediately.
+The frame is filled by the app, not by a URL that carries its own authority:
 
-Every response from this route sets:
+- `GET /api/artifacts/{id}/content?version={n}&format=html` returns the rendered
+  document: an `html` artifact's own markup, a `slides` artifact rendered from
+  its Markdown, or `markdown`/`code`/`data` inside `<pre>`. It is an ordinary
+  authenticated route, re-checked through `ArtifactCtx` on every call, so
+  revoking a grant, a space role or a link stops the next load immediately.
+- The app inserts that document into the frame — `srcdoc` on web,
+  `loadHtmlString` on macOS and iOS — with `sandbox="allow-scripts"` and the
+  `<meta>` policy below at the top of the document. The Apple webview also has a
+  navigation delegate that refuses every request, so the page cannot leave.
+- Public and org link pages are server-rendered at `/a/{token}` and frame the
+  same document from `/a/{token}/content`. Both revalidate the token, its org and
+  the public-link policy per request.
+
+No render URL is signed and no credential travels in a URL, so there is nothing
+in the frame for a script to copy out, and revocation never waits on an expiry.
+
+The frame document carries this policy as a `<meta>` element, because it is
+inserted rather than fetched:
 
 ```
-Content-Security-Policy: sandbox allow-scripts;
+Content-Security-Policy:
   default-src 'none';
   script-src 'unsafe-inline' <cdn allowlist>;
   style-src 'unsafe-inline' https://fonts.googleapis.com <cdn allowlist>;
   font-src https://fonts.gstatic.com data:;
   img-src data: blob:; media-src data: blob:;
-  connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none';
-  frame-ancestors <public url> <content origin>
-X-Content-Type-Options: nosniff
-Referrer-Policy: no-referrer
-Cache-Control: private, no-store
+  connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'
 ```
 
-The CSP `sandbox` directive (without `allow-same-origin`) gives the document an
-**opaque origin even when opened directly**, so its scripts cannot read the
-app's cookies or storage, and the browser does not attach credentials to
-requests it makes. That makes a single-hostname install safe without a second
-domain. `connect-src 'none'` stops fetch and XHR; `form-action 'none'` stops
-form posts; `base-uri 'none'` stops a `<base>` tag from redirecting relative
-URLs; `object-src 'none'` blocks embeds.
+The `sandbox` attribute (without `allow-same-origin`) gives the document an
+**opaque origin**, so its scripts cannot read the app's cookies or storage, and
+the browser does not attach credentials to requests it makes. `connect-src
+'none'` stops fetch and XHR; `form-action 'none'` stops form posts; `base-uri
+'none'` stops a `<base>` tag from redirecting relative URLs; `object-src 'none'`
+blocks embeds. The `/a/{token}` pages set the same policy, plus
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
+`Cache-Control: no-store`, as response headers.
 
 No `allow-popups`, `allow-top-navigation`, `allow-forms` or `allow-modals`: a
 page cannot open windows, navigate the app, submit forms or raise `alert` /
@@ -164,22 +168,20 @@ text to an attacker URL. Links inside an artifact are inert in the frame; the
 injected bridge (D6) forwards a click to the app as `open-link`, and the app
 opens validated `http(s)` URLs outside the frame after a confirmation.
 
-`server.toml` gains:
+`server.toml` gains only the allowlist:
 
 ```toml
 [artifacts]
-content_origin = "https://artifacts.example.com"  # optional, defence in depth
 cdn_allowlist = ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net/npm/", "https://unpkg.com"]
 ```
 
-When `content_origin` is set, render URLs use it and the content route rejects
-requests whose `Host` is the main origin. An offline install sets
-`cdn_allowlist = []`.
+An offline install sets `cdn_allowlist = []`. There is no content origin to
+configure, because frames load no URL.
 
 What is rendered per kind:
 
-- `html` — served as UTF-8 with the bridge script (D6) injected at serve time;
-  the stored content is never rewritten.
+- `html` — returned as UTF-8 with the bridge script (D6) injected at render
+  time; the stored content is never rewritten.
 - `slides` — Markdown, optional YAML frontmatter (`theme: light|dark`,
   `aspect: 16:9|4:3`), slides separated by a line containing only `---`.
   Rendered with `pulldown-cmark` into an embedded deck template (vanilla JS,
@@ -296,8 +298,10 @@ version, kind, title}` only when a tool writes a new version —
 `app/lib/features/artifacts/` with MVVM per project conventions:
 
 - `ArtifactViewer` — native markdown/code/data; for `html`/`slides` an
-  `ArtifactFrame` that uses `HtmlElementView` + `<iframe sandbox="allow-scripts">`
-  on web and `webview_flutter` on macOS/iOS, loading the signed render URL.
+  `ArtifactFrame` that fetches the rendered document and sets it as
+  `<iframe srcdoc sandbox="allow-scripts">` on web, or calls
+  `loadHtmlString` on a `webview_flutter` view on macOS/iOS with a navigation
+  delegate that refuses every navigation.
 - `ArtifactEditor` — source editor (monospace, line numbers) with save →
   `PUT .../content`; on 409 it shows a diff of the user's text vs latest and
   offers "Reapply on latest" or "Discard mine".
@@ -321,9 +325,9 @@ content and `media_type`, `metadata = {kind, version, url}`.
 | GET                  | `/api/artifacts/shared-with-me`                 | —                            |
 | GET / PATCH / DELETE | `/api/artifacts/{id}`                           | view / edit (title) / manage |
 | PUT                  | `/api/artifacts/{id}/content`                   | edit                         |
+| GET                  | `/api/artifacts/{id}/content?format=html`       | view                         |
 | GET                  | `/api/artifacts/{id}/versions`, `/versions/{n}` | view                         |
 | POST                 | `/api/artifacts/{id}/restore`                   | edit                         |
-| POST                 | `/api/artifacts/{id}/render-url`                | view                         |
 | GET                  | `/api/artifacts/{id}/events`                    | view                         |
 | GET / POST           | `/api/artifacts/{id}/comments`                  | view / comment               |
 | PATCH                | `/api/artifacts/{id}/comments/{cid}`            | author or edit (resolve)     |
@@ -332,7 +336,7 @@ content and `media_type`, `metadata = {kind, version, url}`.
 | GET / POST / DELETE  | `/api/artifacts/{id}/links[/{link_id}]`         | manage                       |
 | GET / PUT            | `/api/artifacts/policy`                         | org admin                    |
 | GET                  | `/a/{token}` (public)                           | link                         |
-| GET                  | `/artifact-content/{id}/{version}` (signed)     | signature                    |
+| GET                  | `/a/{token}/content` (public)                   | link                         |
 
 Shapes follow `openspec/config.yaml`: `ArtifactSummary`, `ArtifactDetail`,
 `ArtifactVersionSummary`, `ArtifactVersionDetail`, `CreateArtifactRequest`,
@@ -346,16 +350,15 @@ Shapes follow `openspec/config.yaml`: `ArtifactSummary`, `ArtifactDetail`,
   UI inside a shared page — public links are off by default.
 - **An artifact script can navigate its own frame away.** No CSP stops a page
   from setting `location`, so a script can send text it already renders to an
-  attacker URL, and can carry its own render URL with it. Popups, top
-  navigation, forms and dialogs are blocked; a render URL grants one immutable
-  version, expires in 2 minutes and is rechecked against the viewer's role at
-  redemption, so a copied URL is not a durable credential. Content the page
-  already holds cannot be hidden from its own script — the boundary is that the
-  page gets nothing else.
-- **Revocation.** Role and link changes are rechecked per request, so there is
-  no post-revocation window for a viewer who reloads or refetches. A page
-  already rendered on screen keeps showing what it rendered; closing the frame
-  is the user's action.
+  attacker URL. The Apple webview refuses every navigation, so the path is
+  closed there; on web the browser gives no way to block a frame navigating
+  itself. What leaves is content the viewer can already read on screen, and no
+  credential or API access goes with it — the page holds nothing beyond its own
+  rendered text and has no network channel to spend.
+- **Revocation.** Role and link changes are checked per request, and frames load
+  from the authenticated content route rather than a signed URL, so a revoked
+  viewer's next load fails immediately. A page already on screen keeps showing
+  what it rendered; closing it is the user's action.
 - **CDN dependency.** Allowlisted CDNs see viewer IPs. Operators can empty the
   allowlist.
 - **Opaque origin breaks `localStorage` in artifacts.** Acceptable; in-artifact

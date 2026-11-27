@@ -1,49 +1,56 @@
 ## Purpose
 
-Safe rendering of HTML and slide artifacts on a self-hosted install, with or
-without a separate content origin.
+Safe rendering of HTML and slide artifacts on a self-hosted install, with no
+credential-bearing content URL and no second origin to operate.
 
 ## ADDED Requirements
 
-### Requirement: Rendered content is served from a signed, sandboxed route
+### Requirement: Frames are filled from an authenticated render route
 
-`GET /artifact-content/{id}/{version}` SHALL serve rendered content only with a
-valid signature from `POST /api/artifacts/{id}/render-url` (HMAC-SHA256 over
-artifact id, version, viewer id and expiry; valid at most 2 minutes) or after
-share-link validation. The signature SHALL name the viewer, and the route SHALL
-resolve that viewer's effective role again on every request, returning `404`
-once that role no longer permits `view`. Share links SHALL be revalidated per
-request — token hash, org, policy and expiry — so revoking a link or disabling
-public links returns `404` on the next request. Signed render URLs SHALL NOT be
-issued for link views.
+`GET /api/artifacts/{id}/content?format=html` SHALL return the rendered document
+for `html` and `slides`, and for `markdown`, `code` and `data` when a link
+viewer needs one, only to a caller whose effective role permits `view`, resolved
+through `ArtifactCtx` on every request. The app SHALL insert that document into
+the frame as `srcdoc` on web and `loadHtmlString` on macOS and iOS. No signed
+URL, token or other credential-bearing content URL SHALL exist for app frames.
 
-Every response from this route SHALL carry a `Content-Security-Policy` with a
-`sandbox` directive that includes `allow-scripts` and excludes
-`allow-same-origin`, `allow-popups`, `allow-popups-to-escape-sandbox`,
-`allow-top-navigation*`, `allow-forms` and `allow-modals`, and with
-`connect-src 'none'`, `form-action 'none'`,
-`base-uri 'none'`, `object-src 'none'`, scripts and styles limited to inline
-code and the configured CDN allowlist, and images limited to `data:` and
-`blob:`. It SHALL also send `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: no-referrer` and `Cache-Control: private, no-store`.
-
-#### Scenario: Expired signature
-
-- **WHEN** a render URL is requested after its expiry
-- **THEN** the response is `404`
+Public and org link pages SHALL serve the same document at
+`/a/{token}/content`, revalidating the token, its org, the public-link policy and
+the expiry on every request, and SHALL return `404` once the link is revoked or
+expired or the policy is off.
 
 #### Scenario: Grant revoked while a frame is open
 
-- **GIVEN** a viewer loaded a frame for `a1` and their grant on `a1` is removed
-- **WHEN** the frame reloads and requests its render URL again
-- **THEN** both `POST /api/artifacts/a1/render-url` and the content route return
-  `404`
+- **GIVEN** a viewer has an artifact frame on screen and their grant on `a1` is
+  removed
+- **WHEN** the frame reloads
+- **THEN** `GET /api/artifacts/a1/content?format=html` returns `404`
 
 #### Scenario: Link revoked or policy disabled
 
 - **GIVEN** a public link `L` was issued and the policy is turned off
 - **WHEN** anyone requests `L`'s content URL
 - **THEN** the response is `404` without waiting for an expiry
+
+#### Scenario: No URL to copy out
+
+- **WHEN** the app renders an `html` artifact
+- **THEN** the frame is filled from the render response and no content URL exists
+  that the page or its script could reuse
+
+### Requirement: Frame documents are sandboxed by attribute and meta policy
+
+The app SHALL set `sandbox="allow-scripts"` on the frame — never
+`allow-same-origin`, `allow-popups`, `allow-popups-to-escape-sandbox`,
+`allow-top-navigation*`, `allow-forms` or `allow-modals` — and SHALL prepend a
+`Content-Security-Policy` `<meta>` element with `default-src 'none'`, scripts
+and styles limited to inline code and the configured CDN allowlist, images and
+media limited to `data:` and `blob:`, and `connect-src`, `form-action`,
+`base-uri` and `object-src` set to `'none'`. The macOS and iOS webview SHALL
+refuse every navigation through its navigation delegate. Link pages served by
+the server SHALL return the same policy as response headers, with
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
+`Cache-Control: no-store`.
 
 #### Scenario: Script tries to call the API
 
@@ -53,25 +60,24 @@ code and the configured CDN allowlist, and images limited to `data:` and
 
 #### Scenario: Script tries to leave the frame
 
-- **GIVEN** an `html` artifact whose script calls `window.open` and submits a
-  form
+- **GIVEN** an `html` artifact whose script calls `window.open`, submits a form
+  or sets `location` to an external URL on macOS or iOS
 - **WHEN** it is rendered
-- **THEN** no popup opens and no navigation or form submission happens, because
-  the sandbox omits `allow-popups`, `allow-top-navigation` and `allow-forms`
+- **THEN** no popup opens, no form submits and the navigation delegate refuses
+  the navigation
 
-#### Scenario: Opened directly in a tab
+#### Scenario: Opaque origin
 
-- **WHEN** a user opens a render URL as a top-level page
-- **THEN** the document still has an opaque origin and cannot read the app's
-  cookies or storage
+- **WHEN** a script inside the frame reads `document.cookie` or `localStorage`
+- **THEN** it sees an opaque origin's empty values, not the app's session
 
 ### Requirement: HTML responses carry the selection bridge
 
-For `html` artifacts the route SHALL append the bridge script to the response —
-inside `</body>` when present, otherwise at the end of the document — without
-altering the stored version. The bridge SHALL send only `selection` messages
-(quoted text with its prefix and suffix) and `open-link` messages (a clicked
-URL) to the parent frame.
+For `html` artifacts the render response SHALL append the bridge script — inside
+`</body>` when present, otherwise at the end of the document — without altering
+the stored version. The bridge SHALL send only `selection` messages (quoted text
+with its prefix and suffix) and `open-link` messages (a clicked URL) to the
+parent frame.
 
 #### Scenario: Anchoring in an artifact without its own script
 
@@ -82,7 +88,7 @@ URL) to the parent frame.
 
 #### Scenario: Served content is not a new version
 
-- **WHEN** the route serves an `html` artifact
+- **WHEN** the render route serves an `html` artifact
 - **THEN** the artifact's versions and their content are unchanged by the
   injection
 
@@ -100,13 +106,10 @@ URL) to the parent frame.
   `event.origin` is not `"null"`
 - **THEN** the message is ignored
 
-### Requirement: Operators control the content origin and CDN allowlist
+### Requirement: Operators control the CDN allowlist
 
-`server.toml` `[artifacts]` SHALL accept an optional `content_origin` and a
-`cdn_allowlist` (default cdnjs, jsDelivr `/npm/`, unpkg). When
-`content_origin` is set, render URLs SHALL use it and the content route SHALL
-reject requests addressed to the main origin. An empty allowlist SHALL permit
-no external scripts.
+`server.toml` `[artifacts]` SHALL accept a `cdn_allowlist` (default cdnjs,
+jsDelivr `/npm/`, unpkg). An empty allowlist SHALL permit no external scripts.
 
 #### Scenario: Offline install
 
