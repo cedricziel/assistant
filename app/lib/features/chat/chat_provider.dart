@@ -30,6 +30,14 @@ export 'chat_history_mapping.dart';
 export 'chat_models.dart';
 export 'conversation_list_provider.dart';
 
+/// Error shown when a feedback call fails.
+///
+/// The chat screen turns it into a snackbar instead of the persistent thread
+/// banner, because a failed vote is transient and the selection was already
+/// rolled back.
+const String kFeedbackSaveErrorMessage =
+    'Could not save your feedback. Please try again.';
+
 /// Manages the active chat conversation.
 class ChatNotifier extends AsyncNotifier<ChatState>
     with ChatBranchSwitching, ChatInteractions {
@@ -679,7 +687,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     state = AsyncData(
       current.copyWith(
         messages: List<ChatMessage>.from(current.messages),
-        error: 'Could not save your feedback. Please try again.',
+        error: kFeedbackSaveErrorMessage,
       ),
     );
   }
