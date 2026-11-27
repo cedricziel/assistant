@@ -353,6 +353,7 @@ Class | Method | HTTP request | Description
  - [RespondToInteractionRequestOneOf](doc/RespondToInteractionRequestOneOf.md)
  - [RespondToInteractionRequestOneOf1](doc/RespondToInteractionRequestOneOf1.md)
  - [RespondToInteractionRequestOneOf2](doc/RespondToInteractionRequestOneOf2.md)
+ - [RespondToInteractionRequestOneOf3](doc/RespondToInteractionRequestOneOf3.md)
  - [Role](doc/Role.md)
  - [RotateSecretResponse](doc/RotateSecretResponse.md)
  - [RuleScope](doc/RuleScope.md)

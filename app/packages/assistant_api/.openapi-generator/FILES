@@ -141,6 +141,7 @@ doc/RespondToInteractionRequest.md
 doc/RespondToInteractionRequestOneOf.md
 doc/RespondToInteractionRequestOneOf1.md
 doc/RespondToInteractionRequestOneOf2.md
+doc/RespondToInteractionRequestOneOf3.md
 doc/Role.md
 doc/RotateSecretResponse.md
 doc/RuleScope.md
@@ -397,6 +398,7 @@ lib/src/model/respond_to_interaction_request.dart
 lib/src/model/respond_to_interaction_request_one_of.dart
 lib/src/model/respond_to_interaction_request_one_of1.dart
 lib/src/model/respond_to_interaction_request_one_of2.dart
+lib/src/model/respond_to_interaction_request_one_of3.dart
 lib/src/model/role.dart
 lib/src/model/rotate_secret_response.dart
 lib/src/model/rule_scope.dart

@@ -5,7 +5,7 @@
 //! - [`ask_user`] is the `ask-user` tool that puts questions to the owner.
 //! - [`confirmation`] answers tool approvals through the broker.
 //! - [`kinds`] is the registry of interaction kinds (`tool_approval`,
-//!   `question`, and whatever siblings add).
+//!   `question`, `surface_action`, and whatever siblings add).
 
 pub mod ask_user;
 pub mod broker;
@@ -20,5 +20,6 @@ pub use broker::{
 pub use confirmation::{InteractiveConfirmation, RoutedConfirmation};
 pub use kinds::{
     InteractionKindHandler, InteractionKinds, InteractionOutcome, MAX_ANSWER_CHARS,
-    MAX_ARGUMENTS_BYTES, PushCopy, QuestionKind, SavedRule, ToolApprovalKind, cap_arguments,
+    MAX_ARGUMENTS_BYTES, MAX_SURFACE_ACTION_BYTES, PushCopy, QuestionKind, SavedRule,
+    SurfaceActionKind, ToolApprovalKind, cap_arguments,
 };

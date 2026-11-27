@@ -11,7 +11,7 @@ Name | Type | Description | Notes
 **createdAt** | [**DateTime**](DateTime.md) |  | 
 **expiresAt** | [**DateTime**](DateTime.md) |  | 
 **interactionId** | **String** |  | 
-**kind** | **String** | `tool_approval`, `question`, or a kind a newer server added. | 
+**kind** | **String** | `tool_approval`, `question`, `surface_action`, or a kind a newer server added. | 
 **rendersCard** | **bool** | Whether the kind renders a card in the timeline. | 
 **toolCallId** | **String** | Provider id of the tool call this belongs to, when there is one. | [optional] 
 

@@ -3,6 +3,7 @@
 //! packaged install runs them. Approvals are switched on by the harness, not
 //! by `send_message`: web chat does not ask for approvals yet.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,8 +20,8 @@ use assistant_core::bus_messages::TurnAnchor;
 use assistant_core::types::agent::OrgConfig;
 use assistant_runtime::TurnMode;
 use assistant_storage::{
-    InteractionRow, InteractionStatus, InteractionStore as _, StorageLayer,
-    ToolPermissionRuleStore as _,
+    InteractionRow, InteractionStatus, InteractionStore as _, StorageLayer, SurfaceStatus,
+    SurfaceStore as _, ToolPermissionRuleStore as _,
 };
 
 use super::messages::{RunOptions, start_turn, stream_turn_to_sse};
@@ -82,7 +83,10 @@ async fn mount_script(server: &MockServer, commands: &[&str]) {
 }
 
 struct Harness {
+    /// The runtime that serves the routes.
     state: ApiState,
+    /// The runtime that claims and runs the turns, over the same `space.db`.
+    worker: ApiState,
     storage: Arc<StorageLayer>,
     llm: MockServer,
     conversation: Uuid,
@@ -97,10 +101,11 @@ impl Harness {
         config.memory.enabled = false;
         config.suggestions.enabled = false;
         tune(&mut config);
-        let (state, storage) = split_process_state_with_approvals(&llm.uri(), config).await;
+        let (state, worker, storage) = split_process_state_with_approvals(&llm.uri(), config).await;
         let conversation = seed_conversation(&storage).await;
         Self {
             state,
+            worker,
             storage,
             llm,
             conversation,
@@ -403,5 +408,162 @@ async fn an_answer_after_the_tab_closed_still_resumes_the_turn() {
     assert!(
         kinds.iter().position(|e| *e == "interaction_resolved")
             < kinds.iter().position(|e| *e == "done")
+    );
+}
+
+// -- surface_action waits ----------------------------------------------------
+
+/// A stand-in for `render-surface` that returns a draft and asks the turn to
+/// wait on it. The hook, not the tool, is what this test exercises, so the
+/// draft only has to parse as one.
+struct SurfaceStub;
+
+#[async_trait::async_trait]
+impl assistant_core::ToolHandler for SurfaceStub {
+    fn name(&self) -> &str {
+        "render-surface"
+    }
+
+    fn description(&self) -> &str {
+        "Shows a form."
+    }
+
+    fn params_schema(&self) -> Value {
+        json!({"type": "object", "properties": {}, "required": []})
+    }
+
+    async fn run(
+        &self,
+        _params: HashMap<String, Value>,
+        _ctx: &assistant_core::types::conversation::ExecutionContext,
+    ) -> anyhow::Result<assistant_core::ToolOutput> {
+        Ok(
+            assistant_core::ToolOutput::success("Surface validated.").with_data(json!({
+                "surface": {
+                    "title": "Trip form",
+                    "fallback_text": "A form that asks for a city",
+                    "components": [
+                        {"id": "root", "component": "Column", "children": ["go"]},
+                        {"id": "go", "component": "Button", "child": "label",
+                         "action": {"event": {"name": "submit_form"}}},
+                        {"id": "label", "component": "Text", "text": "Go"}
+                    ],
+                    "data_model": {"city": "Oslo"},
+                    "send_data_model": true
+                },
+                "wait_for_action": true
+            })),
+        )
+    }
+}
+
+/// `/api/chat` replies with one `render-surface` call, then with an answer.
+async fn mount_surface_script(server: &MockServer) {
+    let call = json!({
+        "model": "test",
+        "message": {
+            "role": "assistant", "content": null,
+            "tool_calls": [{"function": {"name": "render-surface", "arguments": {}}}],
+        },
+        "done": true,
+    });
+    let answer = json!({
+        "model": "test",
+        "message": {"role": "assistant", "content": "all done"},
+        "done": true,
+    });
+    for body in [call, answer] {
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .up_to_n_times(1)
+            .mount(server)
+            .await;
+    }
+}
+
+/// A turn waiting on a surface survives the tab closing: the answer resumes
+/// the turn, and the replay holds both the `submitted` status frame and the
+/// rest of the turn that a reload needs.
+#[tokio::test]
+async fn a_surface_wait_answered_after_the_tab_closed_replays_the_submitted_frame() {
+    let h = Harness::new(&[], |config| {
+        config.permissions.allow = vec!["*".parse().unwrap()];
+        config.permissions.interaction_timeout_secs = 30;
+    })
+    .await;
+    h.worker
+        .runtimes
+        .register_ambient_tool(Arc::new(SurfaceStub));
+    mount_surface_script(&h.llm).await;
+
+    let (run, response) = h.start_turn("show me a form").await;
+    let asked = h.pending().await;
+    assert_eq!(asked.kind, "surface_action");
+    drop(response); // the browser tab is gone while the turn waits
+
+    let resp = app(h.state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/conversations/{}/turns/{run}/interactions/{}/respond",
+                    h.conversation, asked.id
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "kind": "surface_action",
+                        "action": {"name": "submit_form", "context": {"city": "Bergen"}},
+                        "data_model": {"city": "Bergen"},
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resolved: Value = serde_json::from_slice(&body_bytes(resp.into_body()).await).unwrap();
+    assert_eq!(resolved["status"], "resolved");
+
+    let frames = h.replay(run).await;
+    let kinds = events(&frames);
+    for expected in ["interaction_requested", "interaction_resolved", "done"] {
+        assert!(kinds.contains(&expected), "{expected} in {kinds:?}");
+    }
+    let statuses: Vec<String> = frames
+        .iter()
+        .filter(|(event, _)| event == "surface_update")
+        .map(|(_, data)| data["status"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(
+        statuses,
+        ["active", "submitted"],
+        "the surface opens, then closes"
+    );
+    let submitted = frames
+        .iter()
+        .find(|(event, data)| event == "surface_update" && data["status"] == "submitted")
+        .map(|(_, data)| data)
+        .expect("a submitted status frame");
+    assert_eq!(
+        submitted["messages"],
+        json!([]),
+        "a status frame carries no components"
+    );
+
+    let surfaces = h
+        .storage
+        .surface_store()
+        .list_for_conversation(h.conversation)
+        .await
+        .unwrap();
+    assert_eq!(surfaces.len(), 1);
+    assert_eq!(surfaces[0].status, SurfaceStatus::Submitted);
+    assert_eq!(surfaces[0].action.as_ref().unwrap()["name"], "submit_form");
+    assert!(
+        h.follow_up_text().await.contains("submit_form"),
+        "the model saw the action"
     );
 }
