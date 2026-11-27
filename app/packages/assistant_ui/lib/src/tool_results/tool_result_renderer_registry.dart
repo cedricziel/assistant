@@ -7,6 +7,8 @@ import 'code_diff_result_view.dart';
 import 'code_file_result_view.dart';
 import 'compact_expandable.dart';
 import 'data_table_result_view.dart';
+import 'link_preview_result_view.dart';
+import 'plan_result_view.dart';
 import 'sources_result_view.dart';
 import 'terminal_result_view.dart';
 import 'tool_result_renderer.dart';
@@ -16,6 +18,8 @@ List<ToolResultRenderer<Object>> defaultToolResultRenderers() => const [
   CodeDiffRenderer(),
   CodeFileRenderer(),
   DataTableResultRenderer(),
+  LinkPreviewRenderer(),
+  PlanResultRenderer(),
   SourcesRenderer(),
   TerminalRenderer(),
 ];

@@ -32,6 +32,7 @@ class ChatState {
     this.pendingQueue = const [],
     this.currentTurnStatus,
     this.suggestions = const [],
+    this.lastInteractionRequest,
   });
 
   final String? conversationId;
@@ -79,6 +80,10 @@ class ChatState {
   /// empty.
   final List<String> suggestions;
 
+  /// The most recent interaction the live stream asked the owner to answer;
+  /// changes trigger approval notifications via [AgentEventListener].
+  final InteractionRecord? lastInteractionRequest;
+
   bool get isStreaming => isSending && streamingContent.isNotEmpty;
 
   ChatState copyWith({
@@ -101,6 +106,7 @@ class ChatState {
     bool clearCurrentTurnStatus = false,
     List<String>? suggestions,
     bool clearSuggestions = false,
+    InteractionRecord? lastInteractionRequest,
   }) {
     return ChatState(
       conversationId: clearConversation
@@ -125,6 +131,8 @@ class ChatState {
       suggestions: clearSuggestions
           ? const []
           : (suggestions ?? this.suggestions),
+      lastInteractionRequest:
+          lastInteractionRequest ?? this.lastInteractionRequest,
     );
   }
 }

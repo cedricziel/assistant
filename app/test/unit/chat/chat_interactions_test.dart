@@ -267,6 +267,7 @@ void main() {
         f.state.currentTurnStatus?.awaitingLabel,
         'Waiting for your approval',
       );
+      expect(f.state.lastInteractionRequest?.id, 'int-1');
       unawaited(f.api.stream.close());
     });
 
