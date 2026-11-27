@@ -27,6 +27,7 @@ import 'chat_provider.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'message_bubble.dart';
+import 'message_feedback_provider.dart';
 import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
 import 'follow_up_chips.dart';
@@ -287,6 +288,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  /// Shows a failed feedback vote as a snackbar rather than the persistent
+  /// thread error banner: the selection was already rolled back and the
+  /// message is transient.
+  void _showFeedbackError(String? previous, String? next) {
+    if (next == null || next == previous || next != kFeedbackSaveErrorMessage) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(next)));
+      ref.read(chatProvider.notifier).dismissError();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // Retry loading the conversation once the API client becomes available.
@@ -296,9 +311,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     final chatAsync = ref.watch(chatProvider);
     final chatState = chatAsync.value ?? const ChatState();
+    // Thumbs, pending sends and the comment field are per-message feedback
+    // state, independent of the conversation list.
+    final feedbackState = ref.watch(messageFeedbackControllerProvider);
     // Tell the thread viewport that something changed; it follows only if the
     // user is at the bottom.
-    ref.listen(chatProvider, (_, _) => _revision++);
+    ref.listen(chatProvider, (previous, next) {
+      _revision++;
+      _showFeedbackError(previous?.value?.error, next.value?.error);
+    });
 
     final personasAsync = ref.watch(personasProvider);
     final activePersona = personasAsync.value?.activePersona;
@@ -421,7 +442,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     },
                     child: ChatThreadLayout(
                       banners: [
-                        if (chatState.error != null)
+                        if (chatState.error != null &&
+                            chatState.error != kFeedbackSaveErrorMessage)
                           ThreadErrorBanner(
                             message: chatState.error!,
                             onDismiss: ref
@@ -496,6 +518,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                     message: msg,
                                     isGrouped: isGrouped,
                                     capabilities: capabilities,
+                                    onFeedbackChanged: (rating) => ref
+                                        .read(chatProvider.notifier)
+                                        .setMessageRating(msg.id, rating),
+                                    feedbackComment:
+                                        feedbackState.commentFields[msg.id] ==
+                                            null
+                                        ? null
+                                        : FeedbackCommentField(
+                                            key: ValueKey(
+                                              'feedback_comment_${msg.id}_${feedbackState.commentFields[msg.id]}',
+                                            ),
+                                            initialText: msg.feedback?.comment,
+                                            sending: feedbackState.pending
+                                                .containsKey(msg.id),
+                                            onSubmit: (comment) => ref
+                                                .read(chatProvider.notifier)
+                                                .submitMessageFeedbackComment(
+                                                  msg.id,
+                                                  comment,
+                                                ),
+                                            onDismiss: () => ref
+                                                .read(chatProvider.notifier)
+                                                .dismissMessageFeedbackComment(
+                                                  msg.id,
+                                                ),
+                                          ),
                                     onRetry: msg.status == MessageStatus.failed
                                         ? () => ref
                                               .read(chatProvider.notifier)

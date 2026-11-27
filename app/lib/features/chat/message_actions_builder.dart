@@ -7,12 +7,45 @@ import '../../shared/platform/widgets.dart';
 import 'chat_provider.dart';
 import 'read_aloud_action.dart';
 
+/// Builds the widgets after the action buttons in [MessageActions.trailing].
+///
+/// [timing] comes first, so a later timing indicator (chat-a11y C11) prepends
+/// to the feedback buttons rather than competing for the slot. The feedback
+/// buttons appear only for a persisted final-answer assistant entry: a
+/// message timeline entry with non-empty content that is not streaming,
+/// failed or the unsaved `assistant-<timestamp>` fallback. Every other entry
+/// (user, tool call, thinking, subagent, command) gets no trailing widget.
+///
+/// [rating] is the caller's current vote and [onRatingChanged] receives the
+/// tapped rating, or `null` when the selected one is tapped again. Without a
+/// callback there is nothing to wire, so no buttons are built.
+List<Widget> buildMessageTrailing({
+  required ChatMessage message,
+  Widget? timing,
+  MessageRating? rating,
+  ValueChanged<MessageRating?>? onRatingChanged,
+}) => [
+  ?timing,
+  if (onRatingChanged != null && _showsFeedback(message))
+    FeedbackButtons(rating: rating, onChanged: onRatingChanged),
+];
+
+/// Whether [message] is a persisted final-answer assistant entry.
+bool _showsFeedback(ChatMessage message) =>
+    message.isAssistant &&
+    message.timelineType == TimelineEntryType.message &&
+    !message.isStreaming &&
+    message.status != MessageStatus.failed &&
+    message.content.trim().isNotEmpty &&
+    !message.id.startsWith('assistant-');
+
 /// Builds the action row shown below a message bubble.
 ///
 /// Decides which actions apply to [message] (Stop, Stopped, Read aloud, Copy,
 /// Share, Save, Retry; [isStopping] keeps Stop visible but disabled) and feeds them to [MessageActions]. [timing] and
 /// [feedback] fill the trailing slot, in that order, once the features that
-/// supply them exist.
+/// supply them exist; [trailing] appends the widgets a composed builder such
+/// as [buildMessageTrailing] returns.
 ///
 /// Branching: Edit ([onEdit]) is offered for persisted user messages and
 /// Regenerate ([onRegenerate]) for persisted assistant messages, only while no
@@ -32,6 +65,7 @@ Widget buildMessageActions({
   bool isStopping = false,
   Widget? timing,
   Widget? feedback,
+  List<Widget> trailing = const [],
   bool isPersisted = false,
   bool turnWorking = false,
   VoidCallback? onEdit,
@@ -183,7 +217,7 @@ Widget buildMessageActions({
               onPressed: onRetry,
             ),
         ],
-        trailing: [?timing, ?feedback],
+        trailing: [?timing, ?feedback, ...trailing],
       );
     },
   );

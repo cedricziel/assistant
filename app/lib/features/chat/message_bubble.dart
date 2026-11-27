@@ -31,6 +31,8 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
     this.isStopping = false,
     this.imageBaseUrl,
     this.imageAuthToken,
+    this.onFeedbackChanged,
+    this.feedbackComment,
   });
 
   final ChatMessage message;
@@ -43,6 +45,13 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   fetchMessageAudio;
   final String? imageBaseUrl;
   final String? imageAuthToken;
+
+  /// Receives a tapped feedback rating, or `null` when the selected one is
+  /// tapped again. `null` leaves the thumbs off.
+  final ValueChanged<MessageRating?>? onFeedbackChanged;
+
+  /// The optional comment field shown below the actions after a vote.
+  final Widget? feedbackComment;
 
   @override
   Widget build(BuildContext context) {
@@ -58,15 +67,42 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
               imageAuthToken: imageAuthToken,
             ),
       audio: _audio(context),
-      actions: buildMessageActions(
-        message: message,
-        capabilities: capabilities,
-        fetchMessageAudio: fetchMessageAudio,
-        onRetry: onRetry,
-        onStop: onStop,
-        isStopping: isStopping,
-      ),
+      actions: _actions(context),
       contextMenuBuilder: _textSelectionContextMenuBuilder,
+    );
+  }
+
+  /// The action row and, after a vote, the optional comment field below it.
+  Widget _actions(BuildContext context) {
+    final actions = buildMessageActions(
+      message: message,
+      capabilities: capabilities,
+      fetchMessageAudio: fetchMessageAudio,
+      onRetry: onRetry,
+      onStop: onStop,
+      isStopping: isStopping,
+      trailing: buildMessageTrailing(
+        message: message,
+        rating: message.feedback?.rating,
+        onRatingChanged: onFeedbackChanged,
+      ),
+    );
+    final comment = feedbackComment;
+    if (comment == null) return actions;
+    return Column(
+      crossAxisAlignment: message.isUser
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        actions,
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: comment,
+          ),
+        ),
+      ],
     );
   }
 
