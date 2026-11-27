@@ -31,7 +31,7 @@ class RegenerateMenuButton extends StatelessWidget {
     if (models.length < 2) return const SizedBox.shrink();
 
     final scheme = Theme.of(context).colorScheme;
-    final muted = scheme.onSurface.withValues(alpha: 0.6);
+    final muted = scheme.onSurfaceVariant;
 
     return PopupMenuButton<String>(
       tooltip: _label,

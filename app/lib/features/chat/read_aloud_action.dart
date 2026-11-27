@@ -80,7 +80,7 @@ class _ReadAloudActionState extends State<ReadAloudAction> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final errorColor = scheme.error;
-    final mutedColor = scheme.onSurface.withValues(alpha: 0.6);
+    final mutedColor = scheme.onSurfaceVariant;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

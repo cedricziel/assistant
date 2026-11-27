@@ -61,7 +61,7 @@ class MessageAttachments extends StatelessWidget {
                       att.filename,
                       style: TextStyle(
                         fontSize: 10,
-                        color: colorScheme.outline,
+                        color: colorScheme.onSurfaceVariant,
                       ),
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
@@ -88,7 +88,10 @@ class MessageAttachments extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     att.filename,
-                    style: TextStyle(fontSize: 10, color: colorScheme.outline),
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -143,7 +146,7 @@ class MessageAttachments extends StatelessWidget {
                             'Tap to retry',
                             style: TextStyle(
                               fontSize: 10,
-                              color: colorScheme.outline,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],

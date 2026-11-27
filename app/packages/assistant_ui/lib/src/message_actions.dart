@@ -39,7 +39,7 @@ class MessageActionButton extends StatelessWidget {
     final color = switch ((tone, selected)) {
       (MessageActionTone.danger, _) => scheme.error,
       (_, true) => scheme.primary,
-      _ => scheme.onSurface.withValues(alpha: 0.6),
+      _ => scheme.onSurfaceVariant,
     };
     return Semantics(
       button: true,
