@@ -15,6 +15,7 @@ class BranchPicker extends StatelessWidget {
     required this.onPrevious,
     required this.onNext,
     this.busy = false,
+    this.model,
   }) : assert(count > 0, 'count must be positive'),
        assert(index >= 0 && index < count, 'index must be within count');
 
@@ -24,35 +25,42 @@ class BranchPicker extends StatelessWidget {
   final VoidCallback onNext;
   final bool busy;
 
+  /// The model that produced the active version, when known and different
+  /// from the default. Shown as the picker's tooltip, so the model behind a
+  /// regenerated version is discoverable.
+  final String? model;
+
   @override
   Widget build(BuildContext context) {
     final style = Theme.of(context).textTheme.labelMedium;
     final hasPrevious = !busy && index > 0;
     final hasNext = !busy && index < count - 1;
 
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: 'Previous version',
+          icon: const Icon(Icons.chevron_left),
+          iconSize: AssistantUiSpacing.lg + AssistantUiSpacing.xs,
+          visualDensity: VisualDensity.compact,
+          onPressed: hasPrevious ? onPrevious : null,
+        ),
+        ExcludeSemantics(child: Text('${index + 1}/$count', style: style)),
+        IconButton(
+          tooltip: 'Next version',
+          icon: const Icon(Icons.chevron_right),
+          iconSize: AssistantUiSpacing.lg + AssistantUiSpacing.xs,
+          visualDensity: VisualDensity.compact,
+          onPressed: hasNext ? onNext : null,
+        ),
+      ],
+    );
+
     return Semantics(
       container: true,
       label: 'Version ${index + 1} of $count',
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            tooltip: 'Previous version',
-            icon: const Icon(Icons.chevron_left),
-            iconSize: AssistantUiSpacing.lg + AssistantUiSpacing.xs,
-            visualDensity: VisualDensity.compact,
-            onPressed: hasPrevious ? onPrevious : null,
-          ),
-          ExcludeSemantics(child: Text('${index + 1}/$count', style: style)),
-          IconButton(
-            tooltip: 'Next version',
-            icon: const Icon(Icons.chevron_right),
-            iconSize: AssistantUiSpacing.lg + AssistantUiSpacing.xs,
-            visualDensity: VisualDensity.compact,
-            onPressed: hasNext ? onNext : null,
-          ),
-        ],
-      ),
+      child: model == null ? row : Tooltip(message: model, child: row),
     );
   }
 }

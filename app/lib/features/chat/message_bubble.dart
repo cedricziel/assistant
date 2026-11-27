@@ -37,6 +37,8 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
     this.turnWorking = false,
     this.onEdit,
     this.onRegenerate,
+    this.onRegenerateWith,
+    this.regenerateModels = const [],
     this.onSwitchBranch,
     this.onFeedbackChanged,
     this.feedbackComment,
@@ -67,6 +69,12 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   final bool turnWorking;
   final VoidCallback? onEdit;
   final VoidCallback? onRegenerate;
+
+  /// Receives the model picked from the "Regenerate with…" menu.
+  final ValueChanged<String>? onRegenerateWith;
+
+  /// The models the menu lists; fewer than two hides it.
+  final List<RegenerateModel> regenerateModels;
   final ValueChanged<String>? onSwitchBranch;
 
   /// Receives a tapped feedback rating, or `null` when the selected one is
@@ -110,6 +118,8 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
       turnWorking: turnWorking,
       onEdit: onEdit,
       onRegenerate: onRegenerate,
+      onRegenerateWith: onRegenerateWith,
+      regenerateModels: regenerateModels,
       onSwitchBranch: onSwitchBranch,
       trailing: buildMessageTrailing(
         message: message,

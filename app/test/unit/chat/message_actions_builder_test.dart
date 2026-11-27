@@ -86,6 +86,7 @@ ChatMessage _assistant({
   bool isStreaming = false,
   TimelineEntryType timelineType = TimelineEntryType.message,
   MessageTiming? timing,
+  String? model,
 }) => ChatMessage(
   id: id,
   role: 'assistant',
@@ -95,6 +96,7 @@ ChatMessage _assistant({
   branch: branch,
   timelineType: timelineType,
   timing: timing,
+  model: model,
 );
 
 double _left(WidgetTester tester, String key) =>
@@ -638,6 +640,45 @@ void main() {
         ),
       );
       expect(find.byType(RegenerateMenuButton), findsNothing);
+    });
+
+    testWidgets('the picker tooltip names a version made by another model', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(branch: _branch, model: 'model-b'),
+          isPersisted: true,
+          regenerateModels: _models,
+          onSwitchBranch: (_) {},
+        ),
+      );
+
+      expect(find.byTooltip('model-b'), findsOneWidget);
+    });
+
+    testWidgets('no tooltip for the default model or an unrecorded one', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(branch: _branch, model: 'model-a'),
+          isPersisted: true,
+          regenerateModels: _models,
+          onSwitchBranch: (_) {},
+        ),
+      );
+      expect(find.byTooltip('model-a'), findsNothing);
+
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(branch: _branch),
+          isPersisted: true,
+          regenerateModels: _models,
+          onSwitchBranch: (_) {},
+        ),
+      );
+      expect(find.byTooltip('model-b'), findsNothing);
     });
   });
 }

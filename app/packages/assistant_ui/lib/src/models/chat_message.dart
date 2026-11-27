@@ -159,6 +159,7 @@ class ChatMessage {
     this.parentId,
     this.branch,
     this.replyBranch,
+    this.model,
     this.surface,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
@@ -252,6 +253,12 @@ class ChatMessage {
   /// of that reply.
   final BranchInfo? replyBranch;
 
+  /// The model that produced this reply, when the server recorded it.
+  ///
+  /// The branch picker uses it to name a version produced by a model other
+  /// than the org default.
+  final String? model;
+
   /// The interaction a [TimelineEntryType.interaction] entry renders. Mutable
   /// like [content]; only set when the request had no tool call to attach to.
   InteractionRecord? interaction;
@@ -315,6 +322,7 @@ class ChatMessage {
         parentId: parentId,
         branch: branch,
         replyBranch: replyBranch,
+        model: model,
         surface: surface ?? this.surface,
       )
       ..interaction = interaction
