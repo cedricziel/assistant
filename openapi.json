@@ -2631,7 +2631,7 @@
           "conversations"
         ],
         "summary": "`POST /api/conversations/{id}/voice` — upload audio, keep it as the user\nmessage's attachment, transcribe it, run through the orchestrator, and\nstream the response as SSE.",
-        "description": "The message text is the transcript, or `[Voice message]` when no\ntranscription provider is configured or transcription fails.",
+        "description": "The message text is the transcript, or `[Voice message]` when no\ntranscription provider is configured or transcription fails.\n\nThe turn runs like `POST /api/conversations/{id}/messages`: the response\ncarries the run id in `X-Run-Id`, the stream opens with `run_started` and\nthe `transcript` frame, every frame is persisted for replay through\n`GET .../runs/{run_id}/events/stream`, `POST .../turns/{run_id}/cancel`\nstops it, and it ends in `done` or `agent_error`.",
         "operationId": "send_voice_message",
         "parameters": [
           {
@@ -13741,6 +13741,17 @@
             ],
             "description": "Name of the tool or skill that produced this result (present when\n`role == \"tool\"`)."
           },
+          "timing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageTimingSummary",
+                "description": "How long the turn that produced this reply took. Present only on the\nfinal assistant message of a turn, omitted when none was recorded."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tool_calls": {
             "type": [
               "array",
@@ -13758,6 +13769,48 @@
           "turn": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "MessageTimingSummary": {
+        "type": "object",
+        "description": "How long a reply took, as sent on the `done` frame and in history.\n\nAbsent figures are omitted, not `null`.",
+        "required": [
+          "total_ms"
+        ],
+        "properties": {
+          "decode_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Time the model spent generating tokens, in milliseconds.",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Output tokens summed over every model call in the turn.",
+            "minimum": 0
+          },
+          "time_to_first_token_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Turn start to the first visible answer token, in milliseconds.",
+            "minimum": 0
+          },
+          "total_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Turn start to just before the final answer was saved, in milliseconds.",
+            "minimum": 0
           }
         }
       },
@@ -15084,6 +15137,49 @@
           },
           "slug": {
             "type": "string"
+          }
+        }
+      },
+      "SseDoneEvent": {
+        "type": "object",
+        "description": "SSE `done` event: the finished reply, the last frame of a successful turn.",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "attachment_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Attachments the reply produced. Omitted when there are none."
+          },
+          "content": {
+            "type": "string",
+            "description": "The full reply text."
+          },
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The saved assistant message. Absent when the turn saved none."
+          },
+          "role": {
+            "type": "string",
+            "description": "Always `assistant`."
+          },
+          "timing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MessageTimingSummary",
+                "description": "How long the turn took. Absent when none was measured."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },

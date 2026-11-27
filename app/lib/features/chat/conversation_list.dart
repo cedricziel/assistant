@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../../shared/platform/adaptive_dialog.dart';
 import 'chat_provider.dart';
+import 'conversation_row_actions.dart';
 import 'conversation_search_field.dart';
 import 'conversation_search_provider.dart';
 
@@ -94,6 +94,33 @@ class ConversationListPane extends ConsumerWidget {
               pinnedAt: conv.pinnedAt,
             ),
         ];
+        final archived = listState.archived;
+        final archivedItems = [
+          for (final conv in archived.conversations)
+            ConversationListItem(
+              id: conv.id,
+              title: conv.title,
+              updatedAt: conv.updatedAt,
+              archivedAt: conv.archivedAt,
+            ),
+        ];
+        final notifier = ref.read(conversationListProvider.notifier);
+        Future<bool> deleteById(String id) {
+          final title = [
+            ...items,
+            ...archivedItems,
+          ].where((i) => i.id == id).firstOrNull?.title;
+          return confirmAndDeleteConversation(context, ref, id, title ?? '');
+        }
+
+        void open(String id) {
+          context.go('/chat/$id');
+          onConversationSelected?.call();
+        }
+
+        void showActions(ConversationActionRequest request) =>
+            showConversationRowActions(context, ref, request);
+
         return ConversationListView(
           items: items,
           selectedId: selectedId,
@@ -109,14 +136,21 @@ class ConversationListPane extends ConsumerWidget {
               ),
             ),
           ),
-          onSelect: (id) {
-            context.go('/chat/$id');
-            onConversationSelected?.call();
-          },
-          onDelete: (id) {
-            final title = items.where((i) => i.id == id).firstOrNull?.title;
-            return _confirmAndDelete(context, ref, id, title ?? '');
-          },
+          onSelect: open,
+          onDelete: deleteById,
+          onRequestActions: showActions,
+          archivedSection: ConversationArchivedSection(
+            expanded: archived.expanded,
+            onExpandedChanged: notifier.setArchivedExpanded,
+            items: archivedItems,
+            loading: archived.loading,
+            error: archived.error,
+            onRetry: notifier.loadArchived,
+            selectedId: selectedId,
+            onSelect: open,
+            onDelete: deleteById,
+            onRequestActions: showActions,
+          ),
         );
       },
     );
@@ -176,29 +210,5 @@ class ConversationListPane extends ConsumerWidget {
         const Divider(height: 8),
       ],
     );
-  }
-
-  /// Confirms, then deletes. Resolves `false` on decline or failure so the
-  /// row stays in the list.
-  Future<bool> _confirmAndDelete(
-    BuildContext context,
-    WidgetRef ref,
-    String id,
-    String title,
-  ) async {
-    final confirm = await showAdaptiveConfirmDialog(
-      context: context,
-      title: 'Delete conversation?',
-      content: '"$title" will be permanently deleted.',
-      confirmLabel: 'Delete',
-      isDestructive: true,
-    );
-    if (!confirm) return false;
-    try {
-      await ref.read(conversationListProvider.notifier).deleteConversation(id);
-      return true;
-    } catch (_) {
-      return false;
-    }
   }
 }

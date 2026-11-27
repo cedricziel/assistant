@@ -1,24 +1,26 @@
 import 'package:material_ui/material_ui.dart';
 
-import 'chat_provider.dart';
+/// A system-event style row for a slash-command acknowledgement: a terminal
+/// icon, the command name (for example `/model`) and the acknowledgement text
+/// in one compact centered row. It is not a chat bubble and has no shell.
+class CommandBody extends StatelessWidget {
+  const CommandBody({super.key, required this.name, required this.ack});
 
-/// A system-event style tile for slash-command events in the chat timeline.
-///
-/// Shows a terminal icon, the command name (e.g. `/model`), and the
-/// acknowledgement text in a compact centered row.
-class CommandEventTile extends StatelessWidget {
-  const CommandEventTile({super.key, required this.message});
+  /// Key of the row, for tests that identify it.
+  static const tileKey = Key('command_event_tile');
 
-  final ChatMessage message;
+  /// The command name without its leading slash.
+  final String name;
+
+  /// The acknowledgement the command produced.
+  final String ack;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final name = message.commandName ?? '';
-    final ack = message.commandAckText ?? message.content;
 
     return Padding(
-      key: const Key('command_event_tile'),
+      key: tileKey,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,

@@ -21,7 +21,6 @@ lib/features/admin/admin_screen.dart
 lib/features/agents/agent_detail_screen.dart
 lib/features/api_keys/api_keys_screen.dart
 lib/features/chat/audio_player_widget.dart
-lib/features/chat/command_event_tile.dart
 lib/features/chat/conversation_list.dart
 lib/features/chat/image_utils.dart
 lib/features/chat/markdown_link_handler.dart

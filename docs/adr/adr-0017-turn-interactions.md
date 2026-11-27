@@ -175,7 +175,10 @@ scanning JSON.
 - **The server computes the rule.** The "always" answers write the rule before
   the tool runs (allow) or before the denial is returned (reject). The rule text
   is the `suggested_rule` stored on the interaction row. The client never sends
-  a pattern, so a tampered client cannot widen a rule.
+  a pattern, so a tampered client cannot widen a rule. The broker's `respond`
+  saves the rule just before it compare-and-sets the row, so the stored
+  resolution and the `interaction_resolved` event carry the `rule_id` from the
+  start. An answer that loses the compare-and-set removes the rule it saved.
 - **Audit.** Each answer logs `assistant::permission` "tool approval answered"
   with user, tool, interaction id, decision and rule id, next to the existing
   policy event.

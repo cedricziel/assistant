@@ -5,6 +5,7 @@ import 'package:assistant_app/shared/platform/adaptive_app.dart';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/capabilities_provider.dart';
+import 'package:assistant_app/api/models/interaction_answer.dart';
 import 'package:assistant_app/api/models/server_capabilities.dart';
 import 'package:assistant_app/api/models/server_profile.dart';
 import 'package:assistant_app/features/chat/audio_player_widget.dart';
@@ -14,6 +15,8 @@ import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
 import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
+import 'package:assistant_ui/assistant_ui.dart'
+    show ApprovalCard, TimelineEntryShell, TurnProgressCard;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,10 +31,22 @@ class _FakeChatNotifier extends ChatNotifier {
 
   void push(ChatState s) => state = AsyncData(s);
 
+  final loadedConversations = <String>[];
+
+  @override
+  Future<void> loadConversation(String conversationId) async =>
+      loadedConversations.add(conversationId);
+
   int stopCalls = 0;
 
   @override
   void stopTurn() => stopCalls++;
+
+  final responses = <(String, InteractionAnswer)>[];
+
+  @override
+  Future<void> respond(String interactionId, InteractionAnswer answer) async =>
+      responses.add((interactionId, answer));
 
   int dismissCalls = 0;
 
@@ -70,6 +85,7 @@ class _FakeConversationListNotifier extends ConversationListNotifier {
 Future<({_FakeChatNotifier notifier})> pumpChatScreen(
   WidgetTester tester, {
   ServerCapabilities? capabilities,
+  ValueNotifier<String?>? conversationId,
 }) async {
   final chatNotifier = _FakeChatNotifier();
 
@@ -99,7 +115,10 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
         ],
       ],
       child: MaterialApp(
-        home: const ChatScreen(),
+        home: ValueListenableBuilder<String?>(
+          valueListenable: conversationId ?? ValueNotifier<String?>(null),
+          builder: (_, id, _) => ChatScreen(conversationId: id),
+        ),
         builder: (_, child) => LegacyDesignBridge(child: child!),
       ),
     ),
@@ -355,6 +374,272 @@ void main() {
         findsNothing,
         reason: 'FAB should disappear after scrolling back to bottom',
       );
+    });
+  });
+
+  group('Chat screen — auto-scroll follows the thread', () {
+    List<ChatMessage> manyMessages(int count) => List.generate(
+      count,
+      (i) => ChatMessage(
+        id: 'msg-$i',
+        role: i.isEven ? 'user' : 'assistant',
+        content: 'Message number $i with enough text to take up space.',
+      ),
+    );
+
+    ScrollPosition position(WidgetTester tester) =>
+        tester.widget<ListView>(find.byType(ListView)).controller!.position;
+
+    /// Estimated extents of a lazy list settle only once the end is laid out,
+    /// so "at the bottom" allows a pixel of slack either way.
+    bool atBottom(ScrollPosition p) => p.pixels >= p.maxScrollExtent - 1;
+
+    /// Streaming entries animate forever, so `pumpAndSettle` never returns;
+    /// this runs past the 200 ms scroll animation instead (the ticker only
+    /// starts on the frame after the one that created it).
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    /// Pushes [before], nudges the thread 40 dp off the end (still inside the
+    /// 80 dp "at the bottom" threshold), pushes [after] and asserts the thread
+    /// scrolled back to where the end was. Expanding entries animate their
+    /// height after the scroll is requested, so the new end is not asserted.
+    Future<void> expectFollows(
+      WidgetTester tester,
+      ChatState before,
+      ChatState Function() after, {
+      bool grows = false,
+    }) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(before);
+      await settle(tester);
+      expect(atBottom(position(tester)), isTrue, reason: 'starts at bottom');
+      final end = position(tester).maxScrollExtent;
+      position(tester).jumpTo(end - 40);
+      await tester.pump();
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsNothing);
+
+      res.notifier.push(after());
+      await settle(tester);
+
+      final pos = position(tester);
+      if (grows) expect(pos.maxScrollExtent, greaterThan(end));
+      expect(pos.pixels, greaterThanOrEqualTo(end - 1), reason: 'followed');
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsNothing);
+    }
+
+    testWidgets('thinking tokens growing only thinkingContent', (tester) async {
+      final filler = manyMessages(30);
+      ChatMessage thinking(String text) => ChatMessage(
+        id: 'thinking-1',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        timelineType: TimelineEntryType.thinking,
+        thinkingContent: text,
+      );
+
+      await expectFollows(
+        tester,
+        ChatState(
+          conversationId: 'c1',
+          messages: [...filler, thinking('Considering the question.')],
+        ),
+        () => ChatState(
+          conversationId: 'c1',
+          messages: [
+            ...filler,
+            thinking(
+              List.filled(40, 'Considering the question at length.').join('\n'),
+            ),
+          ],
+        ),
+      );
+    });
+
+    testWidgets('a subagent tool call appended in place', (tester) async {
+      final filler = manyMessages(30);
+      final subagent = ChatMessage(
+        id: 'subagent-1',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        timelineType: TimelineEntryType.subagent,
+        subagentId: 'sub-1',
+        subagentTask: 'Research the topic',
+      );
+
+      await expectFollows(
+        tester,
+        ChatState(conversationId: 'c1', messages: [...filler, subagent]),
+        () {
+          subagent.subagentToolCalls.add(
+            ToolCallRecord(
+              toolName: 'web-search',
+              status: ToolCallStatus.pending,
+            ),
+          );
+          return ChatState(
+            conversationId: 'c1',
+            messages: [...filler, subagent],
+          );
+        },
+      );
+    });
+
+    testWidgets('a tool status flip', (tester) async {
+      final filler = manyMessages(30);
+      final call = ToolCallRecord(
+        toolName: 'web-search',
+        status: ToolCallStatus.pending,
+      );
+      final entry = ChatMessage(
+        id: 'toolcall-1',
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        timelineType: TimelineEntryType.toolCall,
+        toolCalls: [call],
+      );
+
+      await expectFollows(
+        tester,
+        ChatState(conversationId: 'c1', messages: [...filler, entry]),
+        () {
+          call.status = ToolCallStatus.ok;
+          return ChatState(conversationId: 'c1', messages: [...filler, entry]);
+        },
+      );
+    });
+
+    testWidgets('a queued message added', (tester) async {
+      final filler = manyMessages(30);
+
+      await expectFollows(
+        tester,
+        ChatState(conversationId: 'c1', messages: filler),
+        () => ChatState(
+          conversationId: 'c1',
+          messages: filler,
+          pendingQueue: const [
+            PendingMessage(text: 'Next question', conversationId: 'c1'),
+          ],
+        ),
+        grows: true,
+      );
+      expect(find.text('Next question'), findsOneWidget);
+    });
+
+    testWidgets('opening a different conversation', (tester) async {
+      final id = ValueNotifier<String?>('c1');
+      final res = await pumpChatScreen(tester, conversationId: id);
+      res.notifier.push(
+        ChatState(conversationId: 'c1', messages: manyMessages(30)),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, 600));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsOneWidget);
+
+      id.value = 'c2';
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(res.notifier.loadedConversations, contains('c2'));
+      expect(atBottom(position(tester)), isTrue);
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsNothing);
+    });
+
+    testWidgets('scrolled away, new content leaves the position alone', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+      final filler = manyMessages(30);
+      res.notifier.push(ChatState(conversationId: 'c1', messages: filler));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, 600));
+      await tester.pumpAndSettle();
+      final before = position(tester).pixels;
+
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [...filler, ...manyMessages(2)],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(position(tester).pixels, before);
+      expect(find.byKey(const Key('scroll_to_bottom_button')), findsOneWidget);
+    });
+  });
+
+  group('Chat screen — vertical order', () {
+    double top(WidgetTester tester, Finder finder) =>
+        tester.getTopLeft(finder).dy;
+
+    testWidgets('error banner, history progress, thread, reconnect banner, '
+        'turn progress card, composer', (tester) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          error: 'Server unreachable',
+          isLoadingHistory: true,
+          isReconnecting: true,
+          isSending: true,
+          messages: [ChatMessage(id: 'm1', role: 'user', content: 'Hello')],
+          currentTurnStatus: TurnStatusSnapshot(
+            runId: 'run-1',
+            lastEventKind: TurnEventKind.thinking,
+            lastEventAt: DateTime.now(),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final order = <Finder>[
+        find.text('Server unreachable'),
+        find.byType(LinearProgressIndicator),
+        find.byType(ListView),
+        find.byKey(const Key('reconnect_banner')),
+        find.byKey(const Key('turn_progress_card_label')),
+        find.byKey(const Key('message_input')),
+      ];
+      for (final finder in order) {
+        expect(finder, findsOneWidget, reason: '$finder');
+      }
+      final tops = [for (final f in order) top(tester, f)];
+      expect(tops, [...tops]..sort(), reason: 'top to bottom');
+      expect(tops.toSet(), hasLength(order.length));
+    });
+
+    testWidgets('a reconnect without an active turn sits directly above the '
+        'composer', (tester) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          isReconnecting: true,
+          messages: [ChatMessage(id: 'm1', role: 'user', content: 'Hello')],
+        ),
+      );
+      await tester.pump();
+
+      final banner = find.byKey(const Key('reconnect_banner'));
+      final thread = find.byType(ListView);
+      final composer = find.byKey(const Key('message_input'));
+      expect(banner, findsOneWidget);
+      expect(find.byKey(const Key('turn_progress_card_label')), findsNothing);
+      expect(
+        top(tester, banner),
+        greaterThanOrEqualTo(tester.getBottomLeft(thread).dy),
+        reason: 'banner is below the thread',
+      );
+      expect(top(tester, banner), lessThan(top(tester, composer)));
     });
   });
 
@@ -692,6 +977,80 @@ void main() {
       await tester.pump();
 
       expect(res.notifier.stopCalls, 1);
+    });
+
+    testWidgets('a pending approval shows its card, the awaiting label and '
+        'answers through respond()', (tester) async {
+      final res = await pumpChatScreen(tester);
+      final call =
+          ToolCallRecord(
+              toolName: 'bash',
+              status: ToolCallStatus.pending,
+              toolCallId: 'call-1',
+            )
+            ..interaction = InteractionRecord(
+              id: 'int-1',
+              kind: InteractionKind.toolApproval,
+              status: InteractionStatus.pending,
+              createdAt: DateTime.now(),
+              expiresAt: DateTime.now().add(const Duration(minutes: 10)),
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              arguments: const {'command': 'git status'},
+              options: const [
+                ApprovalDecision.allowOnce,
+                ApprovalDecision.rejectOnce,
+              ],
+            );
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          isSending: true,
+          messages: [
+            ChatMessage(
+              id: 'toolcall-bash',
+              role: 'assistant',
+              content: '',
+              timelineType: TimelineEntryType.toolCall,
+              toolCalls: [call],
+            ),
+          ],
+          currentTurnStatus: TurnStatusSnapshot(
+            runId: 'run-1',
+            lastEventKind: TurnEventKind.status,
+            // Long silent: the stall label must stay hidden.
+            lastEventAt: DateTime.now().subtract(const Duration(minutes: 5)),
+            awaitingLabel: 'Waiting for your approval',
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(ApprovalCard), findsOneWidget);
+      expect(
+        tester
+            .widget<TimelineEntryShell>(find.byType(TimelineEntryShell))
+            .entryState,
+        EntryState.awaitingInput,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(TurnProgressCard),
+          matching: find.text('Waiting for your approval'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('taking longer'), findsNothing);
+
+      await tester.tap(find.text('Allow once'));
+      await tester.pump();
+
+      expect(res.notifier.responses, hasLength(1));
+      expect(res.notifier.responses.single.$1, 'int-1');
+      expect(
+        (res.notifier.responses.single.$2 as ToolApprovalAnswer).decision,
+        ApprovalDecision.allowOnce,
+      );
     });
 
     testWidgets('the error banner shows the error and dismiss calls through', (

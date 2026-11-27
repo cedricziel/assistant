@@ -88,6 +88,25 @@ with `last_event_kind: "suggestions"`, for example. The status stays
 stays open until the run finishes (see
 [ADR-0024](../adr/adr-0024-run-bounds-replay-stream.md)).
 
+## Voice turns
+
+`POST /api/conversations/{id}/voice` runs on the same turn runner as the
+text send endpoint, so a voice turn has a run id, is cancellable and is
+replayable:
+
+- The response carries the run id in `X-Run-Id`.
+- The SSE stream opens with `run_started` (sequence 0), then `transcript`
+  (sequence 1, `{"role":"user","content":"…"}`), then the reply frames.
+- Every frame, `transcript` included, is persisted under the run id, so
+  `GET .../runs/{run_id}/events/stream?since=0` replays the whole turn.
+- `POST .../turns/{run_id}/cancel` ends the stream with
+  `agent_error {"reason":"cancelled"}`. A failed turn ends with
+  `agent_error {"reason":"error"}`, never `done`.
+- Voice turns offer no follow-up suggestions.
+
+The run id only reaches the client once transcription has finished, because
+the response is not sent before then.
+
 ## Cancel semantics
 
 When `cancel_turn` is invoked on a registered turn:

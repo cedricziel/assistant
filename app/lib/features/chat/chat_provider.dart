@@ -20,6 +20,8 @@ import 'chat_timeline_reducers.dart';
 import 'chat_turn_transitions.dart';
 import 'conversation_list_provider.dart';
 import 'follow_up_listener.dart';
+import 'interaction_actions.dart';
+import 'interaction_kinds.dart';
 import 'message_feedback_provider.dart';
 
 export 'package:assistant_ui/models.dart';
@@ -29,7 +31,8 @@ export 'chat_models.dart';
 export 'conversation_list_provider.dart';
 
 /// Manages the active chat conversation.
-class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
+class ChatNotifier extends AsyncNotifier<ChatState>
+    with ChatBranchSwitching, ChatInteractions {
   final _session = ChatStreamSession();
 
   /// Waits for follow-up suggestions after the last `done`. Independent of
@@ -139,6 +142,32 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     state = AsyncData(chatState.copyWith(messages: msgs));
   }
 
+  /// Show an interaction the turn now waits on and announce it.
+  void _onInteractionRequested(
+    ChatState chatState,
+    InteractionRequestedEvent event,
+  ) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    applyInteractionRequested(msgs, event);
+    state = AsyncData(withInteractionMessages(chatState, msgs));
+    final record = findInteraction(msgs, event.interactionId);
+    if (_turnInFlight && record != null) {
+      final announcement = interactionKindSpec(record).announcement;
+      _emit((at) => TurnAwaitingInput(announcement: announcement, at: at));
+    }
+  }
+
+  /// End an interaction and let the progress card return to its activity.
+  void _onInteractionResolved(
+    ChatState chatState,
+    InteractionResolvedEvent event,
+  ) {
+    final msgs = List<ChatMessage>.from(chatState.messages);
+    applyInteractionResolved(msgs, event);
+    state = AsyncData(withInteractionMessages(chatState, msgs));
+    if (_turnInFlight) _emit((at) => TurnInputResolved(at: at));
+  }
+
   /// Apply [reduce] to a copy of the message list and publish the result.
   void _reduceMessages(
     ChatState chatState,
@@ -206,6 +235,10 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
         break;
       case AudioReadyEvent():
         _onAudioReadyEvent(chatState, event);
+      case InteractionRequestedEvent():
+        _onInteractionRequested(chatState, event);
+      case InteractionResolvedEvent():
+        _onInteractionResolved(chatState, event);
       default:
         return false;
     }
@@ -337,6 +370,24 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     if (_session.stopRequested) unawaited(_requestServerCancel());
   }
 
+  /// Open the turn-status snapshot the progress card reads.
+  ///
+  /// Both the text and the voice path open it on `RunStartedEvent`; an
+  /// interaction requested later needs its `runId` to submit an answer.
+  void _openTurnStatus(RunStartedEvent event) {
+    final chatState = state.value ?? const ChatState();
+    state = AsyncData(
+      chatState.copyWith(
+        currentTurnStatus: TurnStatusSnapshot(
+          runId: event.runId,
+          lastEventKind: TurnEventKind.runStarted,
+          lastEventAt: DateTime.now(),
+        ),
+      ),
+    );
+    _armStallTimer();
+  }
+
   /// Store the synthesized-audio id on the streaming assistant placeholder.
   void _onAudioReadyEvent(ChatState chatState, AudioReadyEvent event) {
     final msgs = List<ChatMessage>.from(chatState.messages);
@@ -459,12 +510,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     }
     final status = await api.turnStatus(conversationId, runId);
     if (!_stopStillPending(turn)) return;
-    if (status == TurnState.running || status == null) {
+    if (_isLive(status) || status == null) {
       await _detachTurn(error: _unconfirmedStopError);
     } else {
       await _detachTurn(refresh: true);
     }
   }
+
+  /// Whether [state] says the turn is still alive. A turn waiting for the
+  /// owner's answer is as alive as a running one, and is silent for as long.
+  static bool _isLive(TurnState? state) =>
+      state == TurnState.running || state == TurnState.awaitingInput;
 
   /// Retries of an unanswered cancel request, after the first attempt.
   static const _cancelRetries = 2;
@@ -507,6 +563,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
 
   /// Load an existing conversation by ID.
   Future<void> loadConversation(String conversationId) async {
+    conversationChanged();
     _session.clearDisconnected();
     _cancelFollowUps();
     state = AsyncData(
@@ -656,6 +713,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
 
   /// Start a fresh conversation (no conversation ID set).
   void clearConversation() {
+    conversationChanged();
     _session.clearDisconnected();
     _cancelFollowUps();
     state = const AsyncData(ChatState());
@@ -698,6 +756,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
 
   /// Set the active conversation ID without loading history.
   void setConversationId(String id) {
+    conversationChanged();
     state = AsyncData(
       (state.value ?? const ChatState()).copyWith(conversationId: id),
     );
@@ -713,6 +772,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
       );
       final conv = response.data!;
       ref.read(conversationListProvider.notifier).prependConversation(conv);
+      conversationChanged();
       state = AsyncData(
         (state.value ?? const ChatState()).copyWith(conversationId: conv.id),
       );
@@ -844,14 +904,27 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
         ),
       );
     }
+    // A nonzero-cursor replay never repeats `run_started` (it is stored at
+    // sequence 0), so restore the snapshot from `runId` before the loop. A
+    // retained approval needs it to submit.
+    final restoredStatus =
+        current.currentTurnStatus ??
+        TurnStatusSnapshot(
+          runId: runId,
+          lastEventKind: TurnEventKind.runStarted,
+          lastEventAt: DateTime.now(),
+          awaitingLabel: awaitingLabelOf(msgs),
+        );
     state = AsyncData(
       current.copyWith(
         messages: msgs,
         isSending: true,
         streamingContent: hasPlaceholder ? current.streamingContent : '',
         clearSuggestions: true,
+        currentTurnStatus: restoredStatus,
       ),
     );
+    _armStallTimer();
 
     try {
       await for (final event in _session.untilDetached(
@@ -862,7 +935,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
         if (_applyTurnEvent(chatState, event)) {
           _session.advance(event);
         } else if (event is RunStartedEvent) {
-          _session.advance(event);
+          _captureRunId(event);
         } else if (event is DoneEvent) {
           _session.advance(event);
           _finishTurn(
@@ -1014,6 +1087,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
         // The run id header arrives before the body: not progress.
         if (event is RunStartedEvent) {
           _captureRunId(event);
+          _openTurnStatus(event);
           continue;
         }
         sawProgress = true;
@@ -1151,16 +1225,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
           // Capture the run ID for potential reconnect; don't change UI.
           _captureRunId(event);
           // Open the turn-status snapshot used by the progress card.
-          state = AsyncData(
-            chatState.copyWith(
-              currentTurnStatus: TurnStatusSnapshot(
-                runId: event.runId,
-                lastEventKind: TurnEventKind.runStarted,
-                lastEventAt: DateTime.now(),
-              ),
-            ),
-          );
-          _armStallTimer();
+          _openTurnStatus(event);
           continue;
         }
         // Any non-RunStartedEvent counts as progress — the initial-stall
@@ -1346,8 +1411,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> with ChatBranchSwitching {
     }
     final state = await api.turnStatus(conversationId, runId);
     if (sawProgress() || _session.detached) return;
-    if (state == TurnState.running) {
-      // Server says the turn is still in flight — leave the sink open.
+    if (_isLive(state)) {
+      // Server says the turn is still in flight (or waiting for the owner to
+      // answer an approval) — leave the sink open.
       // The chat-stream-progress-ux card already shows a stalled UI past
       // `kTurnStallThreshold`; the 90 s byte-watchdog is the final
       // safety net for genuinely dead connections.
