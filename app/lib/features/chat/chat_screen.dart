@@ -255,6 +255,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ),
                 ),
           body: GestureDetector(
+            // Dismisses the keyboard on a tap outside the composer. It is not
+            // a control, so it must not surface as an unlabelled tap target.
+            excludeFromSemantics: true,
             onTap: () => FocusScope.of(context).unfocus(),
             child: Row(
               children: [

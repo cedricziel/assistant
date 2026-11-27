@@ -306,6 +306,77 @@ the `gen_ai.evaluation.result` event only records whether a comment exists
 (`assistant.feedback.has_comment`). See
 [opentelemetry.md](opentelemetry.md) for the event and metric reference.
 
+### Response timing
+
+The app can show how long a reply took. It is **off by default**; turn it on
+per device under **Settings → Chat → Show response timing**. The switch is a
+local preference (`assistant.showResponseTiming` in local storage); it never
+reaches the server, so every browser and app install keeps its own setting.
+
+With the switch on, a finished reply that has timing shows a small speed icon in
+its action row. Hover, focus or activate it to see the numbers. They are
+measured by the orchestrator, not the browser:
+
+- **First token** — time from the start of the turn to the first streamed token.
+  Absent when the turn produced no streaming tokens.
+- **Total** — time from the start of the turn until the final answer was saved.
+- **tok/s** — output tokens divided by decode time. Decode time is the time
+  spent streaming tokens and excludes time spent in tool calls. tok/s is shown
+  only when the provider reported a token count and decoding took at least
+  250 ms.
+
+Some OpenAI-compatible providers omit usage for streamed responses unless
+`stream_options.include_usage` is set. Those replies still show first-token and
+total time but no tok/s. Timing is stored per message, so replies that predate
+the feature, older conversations and turns from Slack or Mattermost show none.
+Cancelled and failed turns have no timing either.
+
+### Accessibility
+
+The chat surface targets WCAG AA. A guideline suite
+(`app/test/widget/features/chat/chat_accessibility_test.dart`) pumps the chat
+screen with an attachment, a code block, a tool call, a thinking entry and an
+error banner in both themes, and asserts labelled tap targets, text contrast and
+a label on every tappable node.
+
+**Screen-reader announcements.** Turn lifecycle events are spoken through the
+platform accessibility channel; token frames never are:
+
+- a reply starts: "{Persona} is responding";
+- it finishes: "{Persona} replied: {excerpt}", where the excerpt is the reply
+  as plain text, cut to 200 characters at a word boundary and followed by "…"
+  when cut;
+- the user stops it: "Response stopped";
+- it fails: "Response failed: {message}", spoken immediately;
+- the turn goes quiet for a while: "Still working", at most once per turn, and
+  not while the turn waits for the user (for example a tool approval);
+- a code block is copied: "Code copied".
+
+A turn that is resumed after a dropped connection is announced the same way when
+its reply arrives. Opening a conversation's history is silent. Polite
+announcements are held for up to 1.5 seconds and a burst collapses to the latest
+one, so "Ada is responding" is skipped when the answer arrives immediately.
+The streaming bubble is not a live region, so TalkBack and VoiceOver do not
+re-read it on every token. The error banner is a live region.
+
+**Keyboard.** The composer follows visual order: attach, voice, input, then send
+or stop. Enter sends; Escape closes the slash-command menu. Timeline entry
+headers are focusable and toggle on Enter or Space, and a code block's copy
+button is reachable with Tab and activates with Enter or Space. The response
+timing indicator is a button too; focusing it opens its tooltip.
+
+**Reduced motion.** With the platform's reduce-motion setting on, the thread
+jumps instead of animating when it scrolls to the bottom, timeline entries
+resize without animating, the typing indicator is static, and the code block's
+"Copied" feedback appears in the next frame. Indeterminate progress indicators
+may keep animating because they convey status.
+
+**Layout.** Navigation switches at 768 px of window width. The chat pane splits
+into conversation list and messages only when the pane itself is at least
+768 px wide; otherwise the list lives in the drawer. With the navigation
+sidebar expanded, the list is in the drawer for windows up to 1008 px wide;
+with it collapsed, up to 840 px.
+
 ## REST API (`/api/*`)
 
 These endpoints power the Flutter app and are also consumable directly:

@@ -109,8 +109,7 @@ Widget buildMessageActions({
 
   return Builder(
     builder: (context) {
-      final mutedColor = Theme.of(context).colorScheme.onSurface
-          .withValues(alpha: 0.6);
+      final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
 
       return MessageActions(
         alignment: alignment,
