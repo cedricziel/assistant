@@ -9,16 +9,23 @@ Widget _harness({
   required int count,
   required int revision,
   ThreadViewportController? controller,
+  bool disableAnimations = false,
 }) => MaterialApp(
-  home: Scaffold(
-    body: SizedBox(
-      height: 400,
-      child: ThreadViewport(
-        itemCount: count,
-        revision: revision,
-        controller: controller,
-        itemBuilder: (context, index) =>
-            SizedBox(height: 50, child: Text('row $index')),
+  home: Builder(
+    builder: (context) => MediaQuery(
+      data: MediaQuery.of(context)
+          .copyWith(disableAnimations: disableAnimations),
+      child: Scaffold(
+        body: SizedBox(
+          height: 400,
+          child: ThreadViewport(
+            itemCount: count,
+            revision: revision,
+            controller: controller,
+            itemBuilder: (context, index) =>
+                SizedBox(height: 50, child: Text('row $index')),
+          ),
+        ),
       ),
     ),
   ),
@@ -189,6 +196,67 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(_fab), findsNothing);
+    });
+
+    testWidgets('reduced motion opens on the last item after one pump', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _harness(count: 40, revision: 0, disableAnimations: true),
+      );
+
+      final position = _position(tester);
+      expect(position.pixels, position.maxScrollExtent);
+    });
+
+    testWidgets('reduced motion jumps when the button is pressed', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _harness(count: 40, revision: 0, disableAnimations: true),
+      );
+      _position(tester).jumpTo(500);
+      await tester.pump();
+
+      await tester.tap(find.byKey(_fab));
+      await tester.pump();
+
+      final position = _position(tester);
+      expect(position.pixels, position.maxScrollExtent);
+    });
+
+    testWidgets('reduced motion jumps when a new message arrives', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _harness(count: 40, revision: 0, disableAnimations: true),
+      );
+      final position = _position(tester);
+
+      await tester.pumpWidget(
+        _harness(count: 41, revision: 1, disableAnimations: true),
+      );
+      await tester.pump();
+
+      expect(position.pixels, position.maxScrollExtent);
+      expect(position.maxScrollExtent, greaterThan(1600));
+    });
+
+    testWidgets('without reduced motion scrolling is still animated', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_harness(count: 40, revision: 0));
+      final position = _position(tester);
+      position.jumpTo(500);
+      await tester.pump();
+
+      await tester.tap(find.byKey(_fab));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+
+      expect(position.pixels, greaterThan(500));
+      expect(position.pixels, lessThan(position.maxScrollExtent));
     });
   });
 }

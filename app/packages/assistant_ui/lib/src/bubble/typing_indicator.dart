@@ -2,7 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 /// Animated three-dot indicator shown while waiting for the first token.
 ///
-/// With `MediaQuery.disableAnimations` the dots stay still.
+/// With `MediaQuery.disableAnimations` the dots stay still and the ticker is
+/// stopped, so the indicator schedules no frames.
 class TypingIndicator extends StatelessWidget {
   const TypingIndicator({super.key});
 
@@ -66,8 +67,18 @@ class _DotState extends State<_Dot> with SingleTickerProviderStateMixin {
         ]).animate(
           CurvedAnimation(parent: _controller, curve: Interval(delay, end)),
         );
+  }
 
-    _controller.repeat();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // A repeating ticker schedules frames forever, so stop it entirely under
+    // reduced motion instead of merely skipping the animated build.
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat();
+    }
   }
 
   @override

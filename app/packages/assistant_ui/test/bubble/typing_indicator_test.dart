@@ -34,5 +34,36 @@ void main() {
       );
       expect(find.byType(Opacity), findsNothing);
     });
+
+    testWidgets('reduced motion schedules no frames and stays still', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        const MediaQuery(
+          data: MediaQueryData(disableAnimations: true),
+          child: MaterialApp(home: Scaffold(body: TypingIndicator())),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.binding.hasScheduledFrame, isFalse);
+      expect(tester.binding.transientCallbackCount, 0);
+
+      final before = tester
+          .widgetList<DecoratedBox>(find.byType(DecoratedBox))
+          .map((box) => (box.decoration as BoxDecoration).color)
+          .toList();
+
+      await tester.pump(const Duration(seconds: 1));
+
+      final after = tester
+          .widgetList<DecoratedBox>(find.byType(DecoratedBox))
+          .map((box) => (box.decoration as BoxDecoration).color)
+          .toList();
+
+      expect(after, before);
+      expect(tester.binding.hasScheduledFrame, isFalse);
+      expect(tester.binding.transientCallbackCount, 0);
+    });
   });
 }
