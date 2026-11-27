@@ -370,6 +370,24 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     if (_session.stopRequested) unawaited(_requestServerCancel());
   }
 
+  /// Open the turn-status snapshot the progress card reads.
+  ///
+  /// Both the text and the voice path open it on `RunStartedEvent`; an
+  /// interaction requested later needs its `runId` to submit an answer.
+  void _openTurnStatus(RunStartedEvent event) {
+    final chatState = state.value ?? const ChatState();
+    state = AsyncData(
+      chatState.copyWith(
+        currentTurnStatus: TurnStatusSnapshot(
+          runId: event.runId,
+          lastEventKind: TurnEventKind.runStarted,
+          lastEventAt: DateTime.now(),
+        ),
+      ),
+    );
+    _armStallTimer();
+  }
+
   /// Store the synthesized-audio id on the streaming assistant placeholder.
   void _onAudioReadyEvent(ChatState chatState, AudioReadyEvent event) {
     final msgs = List<ChatMessage>.from(chatState.messages);
@@ -545,6 +563,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
 
   /// Load an existing conversation by ID.
   Future<void> loadConversation(String conversationId) async {
+    conversationChanged();
     _session.clearDisconnected();
     _cancelFollowUps();
     state = AsyncData(
@@ -736,6 +755,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
 
   /// Set the active conversation ID without loading history.
   void setConversationId(String id) {
+    conversationChanged();
     state = AsyncData(
       (state.value ?? const ChatState()).copyWith(conversationId: id),
     );
@@ -751,6 +771,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
       );
       final conv = response.data!;
       ref.read(conversationListProvider.notifier).prependConversation(conv);
+      conversationChanged();
       state = AsyncData(
         (state.value ?? const ChatState()).copyWith(conversationId: conv.id),
       );
@@ -900,7 +921,23 @@ class ChatNotifier extends AsyncNotifier<ChatState>
         if (_applyTurnEvent(chatState, event)) {
           _session.advance(event);
         } else if (event is RunStartedEvent) {
-          _session.advance(event);
+          _captureRunId(event);
+          // A dropped stream cleared the snapshot; restore it from the
+          // resumed run so a retained approval can still submit.
+          final resumed = state.value ?? const ChatState();
+          if (resumed.currentTurnStatus == null) {
+            state = AsyncData(
+              resumed.copyWith(
+                currentTurnStatus: TurnStatusSnapshot(
+                  runId: event.runId,
+                  lastEventKind: TurnEventKind.runStarted,
+                  lastEventAt: DateTime.now(),
+                  awaitingLabel: awaitingLabelOf(resumed.messages),
+                ),
+              ),
+            );
+            _armStallTimer();
+          }
         } else if (event is DoneEvent) {
           _session.advance(event);
           _finishTurn(
@@ -1052,6 +1089,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
         // The run id header arrives before the body: not progress.
         if (event is RunStartedEvent) {
           _captureRunId(event);
+          _openTurnStatus(event);
           continue;
         }
         sawProgress = true;
@@ -1189,16 +1227,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
           // Capture the run ID for potential reconnect; don't change UI.
           _captureRunId(event);
           // Open the turn-status snapshot used by the progress card.
-          state = AsyncData(
-            chatState.copyWith(
-              currentTurnStatus: TurnStatusSnapshot(
-                runId: event.runId,
-                lastEventKind: TurnEventKind.runStarted,
-                lastEventAt: DateTime.now(),
-              ),
-            ),
-          );
-          _armStallTimer();
+          _openTurnStatus(event);
           continue;
         }
         // Any non-RunStartedEvent counts as progress — the initial-stall

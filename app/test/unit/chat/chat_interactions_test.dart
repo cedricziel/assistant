@@ -2,6 +2,7 @@
 // tool call, `respond()` answers it, and the resolved event ends it.
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:assistant_api/assistant_api.dart'
     show InteractionDetail, InteractionStatusView, TurnState;
@@ -28,6 +29,28 @@ class _FakeApi extends ApiClient {
     String message, {
     List<String>? attachmentIds,
   }) => stream.stream;
+
+  @override
+  Stream<StreamEvent> sendVoiceMessage(
+    String conversationId,
+    Uint8List audioBytes,
+    String mimeType,
+  ) => stream.stream;
+
+  /// Every replay subscription opened, in call order.
+  final replays = <StreamController<StreamEvent>>[];
+
+  @override
+  Stream<StreamEvent> streamEventsFrom(
+    String conversationId,
+    String runId, {
+    int since = 0,
+    CancelToken? cancelToken,
+  }) {
+    final replay = StreamController<StreamEvent>();
+    replays.add(replay);
+    return replay.stream;
+  }
 
   final responses = <({String turnId, String interactionId, Object answer})>[];
 
@@ -185,7 +208,7 @@ class _Fixture {
   }
 }
 
-Future<_Fixture> _start(WidgetTester tester) async {
+Future<_Fixture> _start(WidgetTester tester, {bool voice = false}) async {
   final api = _FakeApi();
   late ChatNotifier notifier;
   await tester.pumpWidget(
@@ -198,7 +221,11 @@ Future<_Fixture> _start(WidgetTester tester) async {
   notifier.setConversationId('conv-1');
   final f = _Fixture(tester, api, notifier);
   notifier.lifecycle.listen(f.lifecycle.add);
-  unawaited(notifier.sendMessage('go'));
+  if (voice) {
+    unawaited(notifier.sendVoiceMessage(Uint8List(0), 'audio/wav'));
+  } else {
+    unawaited(notifier.sendMessage('go'));
+  }
   await tester.pump();
   await f.emit(const RunStartedEvent('run-1'));
   return f;
@@ -308,6 +335,35 @@ void main() {
 
       await f.emit(_resolved());
       expect(f.lifecycle.whereType<TurnInputResolved>(), hasLength(1));
+      unawaited(f.api.stream.close());
+    });
+
+    testWidgets('an unregistered kind ignores malformed approval fields', (
+      tester,
+    ) async {
+      final f = await _start(tester);
+      await f.emit(
+        InteractionRequestedEvent(
+          interactionId: 'int-q',
+          kind: 'question',
+          createdAt: DateTime.utc(2026),
+          expiresAt: DateTime.utc(2026, 1, 1, 0, 10),
+          request: const {
+            'tool_name': 42,
+            'reason': false,
+            'suggested_rule': ['bash'],
+            'options': 7,
+          },
+        ),
+      );
+
+      final entry = f.state.messages.firstWhere(
+        (m) => m.timelineType == TimelineEntryType.interaction,
+      );
+      expect(entry.interaction?.toolName, isNull);
+      expect(entry.interaction?.reason, isNull);
+      expect(entry.interaction?.suggestedRule, isNull);
+      expect(entry.interaction?.options, isEmpty);
       unawaited(f.api.stream.close());
     });
   });
@@ -477,6 +533,36 @@ void main() {
       expect(f.state.error, isNotNull);
       unawaited(f.api.stream.close());
     });
+
+    testWidgets('a failed answer does not write into the next conversation', (
+      tester,
+    ) async {
+      final f = await pending(tester);
+      f.api.respondGate = Completer<void>();
+      f.api.respondError = DioException(
+        requestOptions: RequestOptions(path: ''),
+        type: DioExceptionType.connectionError,
+      );
+
+      final future = f.notifier.respond(
+        'int-1',
+        const ToolApprovalAnswer(ApprovalDecision.allowOnce),
+      );
+      await f.settle();
+      f.notifier.setConversationId('conv-2');
+      await f.settle();
+
+      f.api.respondGate!.complete();
+      await tester.runAsync(() => future);
+      await tester.pump();
+
+      expect(
+        f.state.error,
+        isNull,
+        reason: 'the answer belonged to the previous conversation',
+      );
+      unawaited(f.api.stream.close());
+    });
   });
 
   group('Stop while waiting', () {
@@ -515,6 +601,98 @@ void main() {
       expect(f.toolInteraction?.status, InteractionStatus.cancelled);
       expect(f.state.currentTurnStatus, isNull);
       unawaited(f.api.stream.close());
+    });
+  });
+
+  group('voice turns', () {
+    testWidgets('a voice turn opens the status its approval needs', (
+      tester,
+    ) async {
+      final f = await _start(tester, voice: true);
+      expect(
+        f.state.currentTurnStatus?.runId,
+        'run-1',
+        reason: 'the voice path opens the turn-status snapshot too',
+      );
+
+      await f.emit(const StatusEvent('x', toolCallId: 'call-1'));
+      await f.emit(_approval());
+      expect(
+        f.state.currentTurnStatus?.awaitingLabel,
+        'Waiting for your approval',
+      );
+
+      await tester.runAsync(
+        () => f.notifier.respond(
+          'int-1',
+          const ToolApprovalAnswer(ApprovalDecision.allowOnce),
+        ),
+      );
+      await tester.pump();
+      expect(f.api.responses, hasLength(1));
+      expect(f.api.responses.single.turnId, 'run-1');
+      unawaited(f.api.stream.close());
+    });
+  });
+
+  group('replay', () {
+    testWidgets('restores the turn status for a retained approval', (
+      tester,
+    ) async {
+      final f = await _start(tester);
+      await f.emit(const StatusEvent('x', toolCallId: 'call-1'));
+      await f.emit(_approval());
+      final userMessage = f.state.messages.firstWhere((m) => m.role == 'user');
+
+      // The stream ends without `done`, so the turn status is dropped while
+      // the approval stays on the timeline.
+      await tester.runAsync(f.api.stream.close);
+      await tester.pump();
+      expect(f.state.currentTurnStatus, isNull);
+
+      unawaited(f.notifier.retryMessage(userMessage));
+      await f.settle();
+      expect(f.api.replays, hasLength(1), reason: 'one retry opens one replay');
+      final replay = f.api.replays.last;
+      await tester.runAsync(() async {
+        replay.add(const RunStartedEvent('run-1'));
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump();
+
+      expect(f.state.currentTurnStatus?.runId, 'run-1');
+      expect(
+        f.state.currentTurnStatus?.awaitingLabel,
+        'Waiting for your approval',
+      );
+
+      await tester.runAsync(
+        () => f.notifier.respond(
+          'int-1',
+          const ToolApprovalAnswer(ApprovalDecision.allowOnce),
+        ),
+      );
+      await tester.pump();
+      expect(f.api.responses, hasLength(1));
+
+      // End the resumed turn so it cancels its stall timer.
+      await tester.runAsync(() async {
+        replay.add(
+          const DoneEvent(
+            role: 'assistant',
+            content: 'ok',
+            messageId: 'm1',
+            sequenceId: 5,
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump();
+      for (final r in f.api.replays) {
+        unawaited(r.close());
+      }
     });
   });
 }

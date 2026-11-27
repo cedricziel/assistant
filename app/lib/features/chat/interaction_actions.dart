@@ -31,6 +31,19 @@ const _answerFailed =
 /// Lives beside the notifier so `chat_provider.dart` does not grow with every
 /// interaction kind.
 mixin ChatInteractions on AsyncNotifier<ChatState> {
+  /// Bumped whenever the active conversation changes, so an answer's async
+  /// completion cannot write into the conversation the owner switched to.
+  int _conversationEpoch = 0;
+
+  /// Mark the active conversation as changed. Late answer completions from the
+  /// previous one are dropped. Called wherever the notifier selects another
+  /// conversation, including while its history is still loading.
+  void conversationChanged() => _conversationEpoch++;
+
+  /// Whether [epoch] still identifies the active conversation.
+  bool _sameConversation(int epoch) =>
+      ref.mounted && _conversationEpoch == epoch;
+
   /// Send [answer] to the pending interaction [interactionId] of the turn in
   /// flight.
   ///
@@ -47,6 +60,7 @@ mixin ChatInteractions on AsyncNotifier<ChatState> {
     if (current == null || record == null) return;
     if (record.status != InteractionStatus.pending) return;
 
+    final epoch = _conversationEpoch;
     final api = ref.read(apiClientProvider);
     final conversationId = current.conversationId;
     final runId = current.currentTurnStatus?.runId;
@@ -64,15 +78,15 @@ mixin ChatInteractions on AsyncNotifier<ChatState> {
         answer,
       );
     } on DioException catch (e) {
-      if (!ref.mounted) return;
+      if (!_sameConversation(epoch)) return;
       final code = e.response?.statusCode;
       if (code == 409 || code == 410) {
-        await _reload(conversationId, interactionId);
+        await _reload(conversationId, interactionId, epoch);
       } else {
-        _restorePending(interactionId);
+        _restorePending(interactionId, epoch);
       }
     } catch (_) {
-      if (ref.mounted) _restorePending(interactionId);
+      if (_sameConversation(epoch)) _restorePending(interactionId, epoch);
     }
   }
 
@@ -86,7 +100,8 @@ mixin ChatInteractions on AsyncNotifier<ChatState> {
 
   /// Put a card back to pending after a failed request, unless an event has
   /// already ended it.
-  void _restorePending(String id) {
+  void _restorePending(String id, int epoch) {
+    if (!_sameConversation(epoch)) return;
     final current = state.value;
     if (current == null) return;
     final msgs = List<ChatMessage>.from(current.messages);
@@ -102,21 +117,22 @@ mixin ChatInteractions on AsyncNotifier<ChatState> {
     );
   }
 
-  Future<void> _reload(String conversationId, String id) async {
+  Future<void> _reload(String conversationId, String id, int epoch) async {
     try {
       final details = await ref
           .read(apiClientProvider)
           ?.listConversationInteractions(conversationId);
+      if (!_sameConversation(epoch)) return;
       final detail = details?.where((d) => d.interactionId == id).firstOrNull;
       final current = state.value;
-      if (!ref.mounted || current == null) return;
-      if (detail == null) return _restorePending(id);
+      if (current == null) return;
+      if (detail == null) return _restorePending(id, epoch);
       final msgs = List<ChatMessage>.from(current.messages);
       final reloaded = interactionRecordFromDetail(detail);
       updateInteraction(msgs, id, (_) => reloaded);
       state = AsyncData(withInteractionMessages(current, msgs));
     } catch (_) {
-      if (ref.mounted) _restorePending(id);
+      if (_sameConversation(epoch)) _restorePending(id, epoch);
     }
   }
 }

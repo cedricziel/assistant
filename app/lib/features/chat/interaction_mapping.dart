@@ -69,7 +69,10 @@ InteractionRecord _record({
   String? ruleId,
 }) {
   final arguments = request['arguments'];
-  final options = request['options'];
+  // Approval fields exist only on `tool_approval`; a newer server may put any
+  // JSON type in a kind this build does not know, so cast nothing else.
+  final isApproval = kind == InteractionKind.toolApproval.wire;
+  final options = isApproval ? request['options'] : null;
   return InteractionRecord(
     id: id,
     kind: InteractionKind.fromWire(kind),
@@ -78,16 +81,16 @@ InteractionRecord _record({
     expiresAt: expiresAt,
     toolCallId: toolCallId,
     rendersCard: rendersCard,
-    toolName: request['tool_name'] as String?,
+    toolName: isApproval ? request['tool_name'] as String? : null,
     arguments: arguments is Map ? arguments.cast<String, Object?>() : const {},
-    argumentsTruncated: request['arguments_truncated'] == true,
-    reason: request['reason'] as String?,
+    argumentsTruncated: isApproval && request['arguments_truncated'] == true,
+    reason: isApproval ? request['reason'] as String? : null,
     options: [
       if (options is List)
         for (final o in options)
           if (o is String) ?ApprovalDecision.fromWire(o),
     ],
-    suggestedRule: request['suggested_rule'] as String?,
+    suggestedRule: isApproval ? request['suggested_rule'] as String? : null,
     decision: status == InteractionStatus.resolved
         ? approvalDecisionFrom(response)
         : null,
