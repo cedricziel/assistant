@@ -57,14 +57,12 @@ export 'src/tool_results/compact_expandable.dart';
 export 'src/tool_results/data_table_result_view.dart';
 export 'src/tool_results/generic_tool_result_view.dart';
 export 'src/tool_results/json_tree_view.dart';
+export 'src/tool_results/link_preview_result_view.dart';
+export 'src/tool_results/plan_result_view.dart';
 export 'src/tool_results/tool_result_renderer.dart';
 export 'src/tool_results/tool_result_renderer_registry.dart';
 export 'src/turn/turn_progress_card.dart';
 export 'src/turn/turn_status_label.dart';
-
-// export 'src/tool_results/link_preview_result_view.dart'; // slot: tool-result-renderers C5
-
-// export 'src/tool_results/plan_result_view.dart'; // slot: tool-result-renderers C5
 
 // export 'src/tool_results/sources_result_view.dart'; // slot: tool-result-renderers C4
 

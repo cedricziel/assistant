@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Kinds whose view has not landed yet. C4–C7 each remove their kinds until
 /// this set is empty; a kind outside it without a renderer fails the test.
-const pendingKinds = <String>{'terminal', 'sources', 'link_preview', 'plan'};
+const pendingKinds = <String>{'terminal', 'sources'};
 
 /// `schemas/tool-results/fixtures`, resolved from the package root. Fails when
 /// it is missing or holds no fixtures, so a wrong path cannot pass with zero

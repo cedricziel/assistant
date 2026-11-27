@@ -29,6 +29,7 @@ const List<String> kAssistantUiElements = [
   'GenericToolResultView',
   'HighlightedSegments',
   'JsonTreeView',
+  'LinkPreviewResultView',
   'MessageActionButton',
   'MessageActions',
   'MessageBody',
@@ -36,6 +37,7 @@ const List<String> kAssistantUiElements = [
   'MessageEditor',
   'MessageTimingIndicator',
   'PermissionRuleTile',
+  'PlanResultView',
   'QuestionCard',
   'QueuedMessageBubble',
   'RegenerateMenuButton',
@@ -60,10 +62,8 @@ const List<String> kAssistantUiElements = [
   // 'BranchPicker', // slot: message-branching 9
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
-  // 'LinkPreviewResultView', // slot: tool-result-renderers C5
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
-  // 'PlanResultView', // slot: tool-result-renderers C5
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'TimelineEntryShell', // slot: chat-element-library 5b

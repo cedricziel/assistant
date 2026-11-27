@@ -21,6 +21,7 @@ import 'components/feedback_comment_field.dart';
 import 'components/generic_tool_result_view.dart';
 import 'components/highlighted_segments.dart';
 import 'components/json_tree_view.dart';
+import 'components/link_preview_result_view.dart';
 import 'components/message_action_button.dart';
 import 'components/message_actions.dart';
 import 'components/message_body.dart';
@@ -28,6 +29,7 @@ import 'components/message_bubble.dart';
 import 'components/message_editor.dart';
 import 'components/message_timing_indicator.dart';
 import 'components/permission_rule_tile.dart';
+import 'components/plan_result_view.dart';
 import 'components/question_card.dart';
 import 'components/queued_message_bubble.dart';
 import 'components/regenerate_menu_button.dart';
@@ -61,10 +63,8 @@ final List<WidgetbookComponent> kComponents = [
   // branchPickerComponent, // slot: message-branching 9
   // feedbackButtonsComponent, // slot: message-feedback 5
   // feedbackCommentFieldComponent, // slot: message-feedback 5
-  // linkPreviewResultViewComponent, // slot: tool-result-renderers C5
   // messageEditorComponent, // slot: message-branching 9
   // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
-  // planResultViewComponent, // slot: tool-result-renderers C5
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
   // terminalResultViewComponent, // slot: tool-result-renderers C4
   // timelineEntryShellComponent, // slot: chat-element-library 5b
@@ -90,6 +90,7 @@ final List<WidgetbookComponent> kComponents = [
   genericToolResultViewComponent,
   highlightedSegmentsComponent,
   jsonTreeViewComponent,
+  linkPreviewResultViewComponent,
   messageActionButtonComponent,
   messageActionsComponent,
   messageBodyComponent,
@@ -97,6 +98,7 @@ final List<WidgetbookComponent> kComponents = [
   messageEditorComponent,
   messageTimingIndicatorComponent,
   permissionRuleTileComponent,
+  planResultViewComponent,
   questionCardComponent,
   queuedMessageBubbleComponent,
   regenerateMenuButtonComponent,
