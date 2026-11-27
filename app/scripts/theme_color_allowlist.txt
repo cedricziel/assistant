@@ -27,7 +27,6 @@ lib/shared/nav_shell.dart
 # -----------------------------------------------------------------------
 lib/features/admin/admin_screen.dart
 lib/features/api_keys/api_keys_screen.dart
-lib/features/chat/streaming_timeline_entry.dart
 lib/features/chat/svg_builder.dart
 lib/features/connection/connection_screen.dart
 lib/features/logs/logs_screen.dart

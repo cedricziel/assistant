@@ -4,7 +4,7 @@
 import 'package:assistant_app/api/models/interaction_answer.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/mcp_app/mcp_app_provider.dart';
-import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
+import 'package:assistant_app/features/chat/chat_timeline_entry.dart';
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,7 +65,7 @@ Future<void> _pump(
           body: SingleChildScrollView(
             child: ThreadDensityScope(
               density: TimelineDensity.normal,
-              child: StreamingTimelineEntry(
+              child: ChatTimelineEntry(
                 message: message,
                 conversationId: 'conv-1',
                 entryState: timelineEntryState(message),

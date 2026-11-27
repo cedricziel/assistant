@@ -2,16 +2,15 @@
 library;
 
 import 'package:assistant_app/features/chat/chat_provider.dart';
-import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../support/golden.dart';
 
-// Before-image of StreamingTimelineEntry (chat-element-library PR 1b). The
-// extraction PRs render these same inputs through the new elements and must
-// keep every image byte for byte.
+// Before-image of the timeline entry widgets (chat-element-library PR 1b),
+// now rendered through TimelineEntryView. The extraction PRs must keep every
+// image byte for byte.
 
 const _size = Size(420, 240);
 
@@ -101,7 +100,7 @@ Future<void> _golden(
     tester,
     ThreadDensityScope(
       density: density,
-      child: StreamingTimelineEntry(message: message, entryState: state),
+      child: TimelineEntryView(message: message, entryState: state),
     ),
     size: _size,
     brightness: brightness,
@@ -266,18 +265,8 @@ void main() {
     });
   });
 
-  // StreamingTimelineEntry renders nothing for command entries; the chat
-  // screen draws them with CommandBody, which is what is captured here.
+  // TimelineEntryView draws a command entry with CommandBody, without a shell.
   group('command', () {
-    testWidgets('StreamingTimelineEntry renders nothing', (tester) async {
-      await pumpGolden(
-        tester,
-        StreamingTimelineEntry(message: _command()),
-        size: _size,
-      );
-      expect(find.byType(Text), findsNothing);
-    });
-
     for (final density in TimelineDensity.values) {
       testWidgets('tile, ${density.name}', (tester) async {
         final width = switch (density) {
@@ -285,10 +274,9 @@ void main() {
           TimelineDensity.normal => 500.0,
           TimelineDensity.expanded => 760.0,
         };
-        final command = _command();
         await pumpGolden(
           tester,
-          CommandBody(name: command.commandName!, ack: command.commandAckText!),
+          TimelineEntryView(message: _command()),
           size: Size(width, 60),
         );
         await tester.pump(const Duration(milliseconds: 50));
