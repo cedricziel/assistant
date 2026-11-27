@@ -8,7 +8,7 @@ Subagent Processes use the same check as the main turn.
 
 Before this feature, tools ran without a check unless a tool asked for confirmation, and that check only applied to interactive turns with a callback registered. Now every call is checked.
 
-With no `[permissions]` section, a call that no rule allows is denied on any turn that cannot prompt a user. Scheduled tasks, Slack, Matrix, the web UI and Subagent Processes all fall in that group. Only the interactive CLI turn can prompt. If a scheduled task used `bash` or `web-fetch` before, it fails until you add an allow rule for it.
+With no `[permissions]` section, a call that no rule allows is denied on any turn that cannot prompt a user. Scheduled tasks, messenger interfaces, voice and quick-message turns, A2A, MCP and Subagent Processes all fall in that group. Only interactive turns can prompt: the CLI REPL and streaming web chat. If a scheduled task used `bash` or `web-fetch` before, it fails until you add an allow rule for it.
 
 ## How a call is decided
 
@@ -272,7 +272,7 @@ Rules match the URL string as the LLM wrote it. A hostname that resolves to a bl
 
 ## Approvals and saved rules
 
-A turn that someone is watching asks that person before it runs a call the pipeline left undecided. The request is an _approval_. It names the tool and its arguments and waits for the answer. Approvals are rolling out with web chat: until web chat shows approval cards, web turns still deny an undecided call.
+A turn that someone is watching asks that person before it runs a call the pipeline left undecided. The request is an _approval_. It names the tool and its arguments and waits for the answer. In web chat the approval appears as a card in the conversation; see [Approvals and questions](chat/approvals-and-questions.md) for the cards, timeouts, notifications and saved rules.
 
 ### The four answers
 
