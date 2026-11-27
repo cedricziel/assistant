@@ -51,7 +51,10 @@ mixin ChatBranchSwitching on AsyncNotifier<ChatState> {
       supersedeTurn();
       state = AsyncData(
         latest.copyWith(
-          messages: chatMessagesFromHistory(detail.messages),
+          messages: chatMessagesFromHistory(
+            detail.messages,
+            interactions: detail.interactions,
+          ),
           isSwitchingBranch: false,
           isSending: false,
           isStopping: false,

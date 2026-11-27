@@ -20,6 +20,7 @@ import 'package:assistant_ui/assistant_ui.dart'
         CodeFileResultView,
         FeedbackButtons,
         MessageActionButton,
+        QuestionCard,
         TimelineEntryShell,
         TimelineEntryView,
         TurnProgressCard;
@@ -1139,6 +1140,86 @@ void main() {
         (res.notifier.responses.single.$2 as ToolApprovalAnswer).decision,
         ApprovalDecision.allowOnce,
       );
+    });
+
+    testWidgets('a pending question shows its card, the answer label and '
+        'submits the answers through respond()', (tester) async {
+      final res = await pumpChatScreen(tester);
+      final now = DateTime.now();
+      final call =
+          ToolCallRecord(
+              toolName: 'ask-user',
+              status: ToolCallStatus.pending,
+              toolCallId: 'call-q',
+            )
+            ..interaction = InteractionRecord(
+              id: 'int-q',
+              kind: InteractionKind.question,
+              status: InteractionStatus.pending,
+              createdAt: now,
+              expiresAt: now.add(const Duration(minutes: 10)),
+              toolCallId: 'call-q',
+              questions: const [
+                QuestionItem(
+                  id: 'q1',
+                  prompt: 'Which branch?',
+                  options: [
+                    QuestionOption(id: 'o1', label: 'main'),
+                    QuestionOption(id: 'o2', label: 'release'),
+                  ],
+                ),
+              ],
+            );
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          isSending: true,
+          messages: [
+            ChatMessage(
+              id: 'toolcall-ask-user',
+              role: 'assistant',
+              content: '',
+              timelineType: TimelineEntryType.toolCall,
+              toolCalls: [call],
+            ),
+          ],
+          currentTurnStatus: TurnStatusSnapshot(
+            runId: 'run-1',
+            lastEventKind: TurnEventKind.status,
+            lastEventAt: DateTime.now().subtract(const Duration(minutes: 5)),
+            awaitingLabel: 'Waiting for your answer',
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(QuestionCard), findsOneWidget);
+      expect(
+        tester
+            .widget<TimelineEntryShell>(find.byType(TimelineEntryShell))
+            .entryState,
+        EntryState.awaitingInput,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(TurnProgressCard),
+          matching: find.text('Waiting for your answer'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('release'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('question_submit')));
+      await tester.pump();
+
+      expect(res.notifier.responses, hasLength(1));
+      expect(res.notifier.responses.single.$1, 'int-q');
+      final answers =
+          (res.notifier.responses.single.$2 as QuestionAnswers).answers;
+      expect(answers.single.questionId, 'q1');
+      expect(answers.single.selectedOptionIds, ['o2']);
+      expect(answers.single.text, isNull);
     });
 
     testWidgets('the error banner shows the error and dismiss calls through', (

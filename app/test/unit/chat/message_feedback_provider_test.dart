@@ -164,6 +164,12 @@ class _FakeApiClient extends ApiClient {
 
   @override
   ConversationsApi get conversations => fake;
+
+  @override
+  Future<List<InteractionDetail>> listConversationInteractions(
+    String conversationId, {
+    InteractionStatusView? status,
+  }) async => const [];
 }
 
 // -- Harness -----------------------------------------------------------------

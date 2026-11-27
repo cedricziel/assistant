@@ -11,7 +11,9 @@ MessageSummary _msg({
   required String content,
   int turn = 0,
   String? finishReason,
-  List<({String name, String status, String? result})> toolCalls = const [],
+  DateTime? createdAt,
+  List<({String name, String status, String? result, String? id})> toolCalls =
+      const [],
   List<({String id, String filename, String mimeType, String url})>
       attachments =
       const [],
@@ -24,7 +26,7 @@ MessageSummary _msg({
       ..role = role
       ..content = content
       ..turn = turn
-      ..createdAt = DateTime.parse('2026-05-16T00:00:00Z')
+      ..createdAt = createdAt ?? DateTime.parse('2026-05-16T00:00:00Z')
       ..ttsAvailable = false
       ..feedback = feedback == null
           ? null
@@ -48,7 +50,8 @@ MessageSummary _msg({
                   (t) => t
                     ..name = tc.name
                     ..status = tc.status
-                    ..result = tc.result,
+                    ..result = tc.result
+                    ..toolCallId = tc.id,
                 ),
               ),
             )
@@ -67,6 +70,40 @@ MessageSummary _msg({
                 ),
               ),
             ),
+  );
+}
+
+InteractionDetail _interaction({
+  required String id,
+  String kind = 'tool_approval',
+  InteractionStatusView status = InteractionStatusView.resolved,
+  String? toolCallId,
+  String runId = 'run-1',
+  DateTime? createdAt,
+  Map<String, Object?> request = const {
+    'tool_name': 'bash',
+    'arguments': {'command': 'git status'},
+    'options': ['allow_once', 'allow_always', 'reject_once'],
+  },
+  Map<String, Object?>? response = const {'decision': 'allow_once'},
+}) {
+  final created = createdAt ?? DateTime.parse('2026-05-16T00:01:30Z');
+  return InteractionDetail(
+    (b) => b
+      ..interactionId = id
+      ..conversationId = 'conv-1'
+      ..runId = runId
+      ..kind = kind
+      ..status = status
+      ..rendersCard = true
+      ..toolCallId = toolCallId
+      ..createdAt = created
+      ..expiresAt = created.add(const Duration(minutes: 10))
+      ..resolvedAt = status == InteractionStatusView.resolved
+          ? created.add(const Duration(seconds: 5))
+          : null
+      ..request = JsonObject(request)
+      ..response = response == null ? null : JsonObject(response),
   );
 }
 
@@ -160,7 +197,7 @@ void main() {
         id: 'a2',
         role: 'assistant',
         content: '',
-        toolCalls: [(name: 'web-search', status: 'ok', result: 'r')],
+        toolCalls: [(name: 'web-search', status: 'ok', result: 'r', id: null)],
       ).rebuild((b) => b..parentId = 'u1');
 
       final out = chatMessagesFromHistory([toolOnly]);
@@ -185,21 +222,25 @@ void main() {
             role: 'assistant',
             content: '',
             turn: 1,
-            toolCalls: [(name: 'bash', status: 'ok', result: 'ok')],
+            toolCalls: [(name: 'bash', status: 'ok', result: 'ok', id: null)],
           ),
           _msg(
             id: 'a2',
             role: 'assistant',
             content: '',
             turn: 2,
-            toolCalls: [(name: 'web-fetch', status: 'ok', result: 'ok')],
+            toolCalls: [
+              (name: 'web-fetch', status: 'ok', result: 'ok', id: null),
+            ],
           ),
           _msg(
             id: 'a3',
             role: 'assistant',
             content: '',
             turn: 3,
-            toolCalls: [(name: 'slack-post', status: 'ok', result: 'ok')],
+            toolCalls: [
+              (name: 'slack-post', status: 'ok', result: 'ok', id: null),
+            ],
           ),
           _msg(id: 'a4', role: 'assistant', content: 'Done.', turn: 4),
         ];
@@ -246,7 +287,7 @@ void main() {
             id: 'a1',
             role: 'assistant',
             content: 'Calling tool first.',
-            toolCalls: [(name: 'bash', status: 'ok', result: 'ok')],
+            toolCalls: [(name: 'bash', status: 'ok', result: 'ok', id: null)],
           ),
         ];
 
@@ -285,8 +326,8 @@ void main() {
           role: 'assistant',
           content: '',
           toolCalls: [
-            (name: 'bash', status: 'ok', result: 'stdout: ok'),
-            (name: 'web-fetch', status: 'error', result: '404'),
+            (name: 'bash', status: 'ok', result: 'stdout: ok', id: null),
+            (name: 'web-fetch', status: 'error', result: '404', id: null),
           ],
         ),
       ];
@@ -312,7 +353,9 @@ void main() {
           id: 'a1',
           role: 'assistant',
           content: '',
-          toolCalls: [(name: 'image-gen', status: 'ok', result: 'ok')],
+          toolCalls: [
+            (name: 'image-gen', status: 'ok', result: 'ok', id: null),
+          ],
           attachments: [
             (
               id: 'att1',
@@ -348,7 +391,9 @@ void main() {
           id: 'a1',
           role: 'assistant',
           content: '',
-          toolCalls: [(name: 'bash', status: 'pending', result: null)],
+          toolCalls: [
+            (name: 'bash', status: 'pending', result: null, id: null),
+          ],
         ),
       ];
 
@@ -365,7 +410,9 @@ void main() {
           id: 'a1',
           role: 'assistant',
           content: '',
-          toolCalls: [(name: 'bash', status: 'cancelled', result: null)],
+          toolCalls: [
+            (name: 'bash', status: 'cancelled', result: null, id: null),
+          ],
         ),
       ];
 
@@ -385,8 +432,8 @@ void main() {
           role: 'assistant',
           content: '',
           toolCalls: [
-            (name: 'bash', status: 'ok', result: 'first'),
-            (name: 'bash', status: 'ok', result: 'second'),
+            (name: 'bash', status: 'ok', result: 'first', id: null),
+            (name: 'bash', status: 'ok', result: 'second', id: null),
           ],
         ),
       ];
@@ -552,6 +599,252 @@ void main() {
       expect(app.permissions.geolocation, isTrue);
       expect(app.permissions.camera, isFalse);
       expect(records[1].app, isNull);
+    });
+  });
+
+  group('chatMessagesFromHistory — interactions', () {
+    test('a detail with a tool_call_id becomes a receipt on that call', () {
+      final history = [
+        _msg(id: 'u1', role: 'user', content: 'go', turn: 1),
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          turn: 1,
+          toolCalls: [(name: 'bash', status: 'ok', result: 'ok', id: 'call-1')],
+        ),
+      ];
+
+      final messages = chatMessagesFromHistory(
+        history,
+        interactions: [_interaction(id: 'int-1', toolCallId: 'call-1')],
+      );
+
+      final call = messages
+          .firstWhere((m) => m.timelineType == TimelineEntryType.toolCall)
+          .toolCalls
+          .single;
+      expect(call.interaction?.id, 'int-1');
+      expect(call.interaction?.status, InteractionStatus.resolved);
+      expect(call.interaction?.decision, ApprovalDecision.allowOnce);
+      expect(
+        messages.where((m) => m.timelineType == TimelineEntryType.interaction),
+        isEmpty,
+        reason: 'a matched receipt needs no standalone entry',
+      );
+    });
+
+    test('an interaction whose tool call is not on the active branch renders '
+        'nowhere', () {
+      final history = [
+        _msg(id: 'u1', role: 'user', content: 'go', turn: 1),
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          turn: 1,
+          toolCalls: [
+            (name: 'bash', status: 'ok', result: 'ok', id: 'call-active'),
+          ],
+        ),
+      ];
+
+      final messages = chatMessagesFromHistory(
+        history,
+        interactions: [
+          _interaction(id: 'int-gone', toolCallId: 'call-regenerated-away'),
+        ],
+      );
+
+      expect(
+        messages.where((m) => m.timelineType == TimelineEntryType.interaction),
+        isEmpty,
+        reason: 'not parked at the end of an unrelated turn',
+      );
+      expect(
+        messages
+            .firstWhere((m) => m.timelineType == TimelineEntryType.toolCall)
+            .toolCalls
+            .single
+            .interaction,
+        isNull,
+      );
+    });
+
+    test('without an id joins per turn and per tool name, then falls back to '
+        'the end of the turn', () {
+      final history = [
+        _msg(
+          id: 'u1',
+          role: 'user',
+          content: 'go',
+          turn: 1,
+          createdAt: DateTime.parse('2026-05-16T00:01:00Z'),
+        ),
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          turn: 1,
+          createdAt: DateTime.parse('2026-05-16T00:01:10Z'),
+          toolCalls: [
+            (name: 'bash', status: 'ok', result: 'A', id: null),
+            (name: 'bash', status: 'ok', result: 'B', id: null),
+          ],
+        ),
+        _msg(
+          id: 'a2',
+          role: 'assistant',
+          content: 'done',
+          turn: 1,
+          createdAt: DateTime.parse('2026-05-16T00:01:40Z'),
+        ),
+        _msg(
+          id: 'u2',
+          role: 'user',
+          content: 'next',
+          turn: 2,
+          createdAt: DateTime.parse('2026-05-16T00:02:00Z'),
+        ),
+      ];
+
+      final messages = chatMessagesFromHistory(
+        history,
+        interactions: [
+          _interaction(
+            id: 'int-a',
+            createdAt: DateTime.parse('2026-05-16T00:01:20Z'),
+          ),
+          _interaction(
+            id: 'int-b',
+            createdAt: DateTime.parse('2026-05-16T00:01:25Z'),
+          ),
+          _interaction(
+            id: 'int-c',
+            createdAt: DateTime.parse('2026-05-16T00:01:30Z'),
+          ),
+        ],
+      );
+
+      final calls = messages
+          .where((m) => m.timelineType == TimelineEntryType.toolCall)
+          .map((m) => m.toolCalls.single)
+          .toList();
+      expect(calls[0].interaction?.id, 'int-a');
+      expect(calls[1].interaction?.id, 'int-b');
+
+      final fallback = messages.singleWhere(
+        (m) => m.timelineType == TimelineEntryType.interaction,
+      );
+      expect(fallback.interaction?.id, 'int-c');
+      expect(
+        messages.indexOf(fallback),
+        greaterThan(messages.indexOf(messages.firstWhere((m) => m.id == 'a2'))),
+        reason: 'the fallback sits at the end of its own turn',
+      );
+      expect(
+        messages.indexOf(fallback),
+        lessThan(messages.indexOf(messages.firstWhere((m) => m.id == 'u2'))),
+        reason: 'never at the end of a later turn',
+      );
+    });
+
+    test('a question detail carries its questions and answers', () {
+      final history = [
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          turn: 1,
+          toolCalls: [
+            (name: 'ask-user', status: 'ok', result: 'ok', id: 'call-q'),
+          ],
+        ),
+      ];
+      final messages = chatMessagesFromHistory(
+        history,
+        interactions: [
+          _interaction(
+            id: 'int-q',
+            kind: 'question',
+            toolCallId: 'call-q',
+            request: {
+              'questions': [
+                {
+                  'id': 'q1',
+                  'prompt': 'Which branch?',
+                  'options': [
+                    {'id': 'o1', 'label': 'main'},
+                    {'id': 'o2', 'label': 'release'},
+                  ],
+                  'multiple': false,
+                  'free_text': false,
+                },
+              ],
+            },
+            response: {
+              'answers': [
+                {
+                  'question_id': 'q1',
+                  'selected_option_ids': ['o2'],
+                },
+              ],
+            },
+          ),
+        ],
+      );
+
+      final record = messages
+          .firstWhere((m) => m.timelineType == TimelineEntryType.toolCall)
+          .toolCalls
+          .single
+          .interaction!;
+      expect(record.kind, InteractionKind.question);
+      expect(record.questions.single.prompt, 'Which branch?');
+      expect(record.questions.single.options.map((o) => o.label), [
+        'main',
+        'release',
+      ]);
+      expect(record.answers.single.selectedOptionIds, ['o2']);
+      expect(record.declined, isFalse);
+    });
+
+    test('a declined question receipt says so', () {
+      final history = [
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          turn: 1,
+          toolCalls: [
+            (name: 'ask-user', status: 'ok', result: 'ok', id: 'call-q'),
+          ],
+        ),
+      ];
+      final record =
+          chatMessagesFromHistory(
+                history,
+                interactions: [
+                  _interaction(
+                    id: 'int-q',
+                    kind: 'question',
+                    toolCallId: 'call-q',
+                    request: {
+                      'questions': [
+                        {'id': 'q1', 'prompt': 'Which branch?', 'options': []},
+                      ],
+                    },
+                    response: {'declined': true},
+                  ),
+                ],
+              )
+              .firstWhere((m) => m.timelineType == TimelineEntryType.toolCall)
+              .toolCalls
+              .single
+              .interaction!;
+
+      expect(record.declined, isTrue);
+      expect(record.answers, isEmpty);
     });
   });
 

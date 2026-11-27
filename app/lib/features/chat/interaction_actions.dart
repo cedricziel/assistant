@@ -1,8 +1,12 @@
+import 'package:assistant_api/assistant_api.dart' show InteractionDetail;
+import 'package:assistant_api/assistant_api.dart' show InteractionStatusView;
 import 'package:assistant_ui/models.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/api_client.dart';
 import '../../api/models/interaction_answer.dart';
+import '../../api/models/stream_event.dart';
 import '../connection/connection_provider.dart';
 import 'chat_models.dart';
 import 'chat_timeline_reducers.dart';
@@ -43,6 +47,70 @@ mixin ChatInteractions on AsyncNotifier<ChatState> {
   /// Whether [epoch] still identifies the active conversation.
   bool _sameConversation(int epoch) =>
       ref.mounted && _conversationEpoch == epoch;
+
+  /// The interactions of [conversationId] that still wait for their owner.
+  ///
+  /// Opening a conversation checks this list so a card survives a reload, a
+  /// push tap on another device and a lost stream. A failure is not fatal: the
+  /// history's own interactions still render.
+  Future<List<InteractionDetail>> pendingInteractions(
+    ApiClient api,
+    String conversationId,
+  ) async {
+    try {
+      return await api.listConversationInteractions(
+        conversationId,
+        status: InteractionStatusView.pending,
+      );
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Follow [runId]'s replay stream for a conversation opened with a pending
+  /// interaction, so its card can be answered and ended.
+  ///
+  /// Only interaction events are applied: history already carries the tool
+  /// calls and text, and replaying them would duplicate entries. The run's
+  /// terminal frame calls [onEnded] so the caller can reconcile the final
+  /// reply and receipts from history.
+  Future<void> watchPendingRun(
+    ApiClient api,
+    String conversationId,
+    String runId, {
+    Future<void> Function()? onEnded,
+  }) async {
+    final epoch = _conversationEpoch;
+    try {
+      await for (final event in api.streamEventsFrom(
+        conversationId,
+        runId,
+        since: 0,
+      )) {
+        if (!_sameConversation(epoch)) return;
+        final current = state.value;
+        if (current == null) return;
+        switch (event) {
+          case InteractionRequestedEvent():
+            final msgs = List<ChatMessage>.from(current.messages);
+            applyInteractionRequested(msgs, event);
+            state = AsyncData(withInteractionMessages(current, msgs));
+          case InteractionResolvedEvent():
+            final msgs = List<ChatMessage>.from(current.messages);
+            applyInteractionResolved(msgs, event);
+            state = AsyncData(withInteractionMessages(current, msgs));
+          case DoneEvent() || AgentErrorEvent() || ErrorEvent():
+            if (onEnded != null) await onEnded();
+            return;
+          default:
+            // Tokens, tool statuses and thinking are already in history.
+            break;
+        }
+      }
+    } catch (_) {
+      // The card stays; a later reload finds the stored status.
+    }
+  }
 
   /// Send [answer] to the pending interaction [interactionId] of the turn in
   /// flight.

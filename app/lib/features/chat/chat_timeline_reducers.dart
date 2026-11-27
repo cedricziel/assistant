@@ -361,6 +361,8 @@ void applyInteractionResolved(
         decision: approvalDecisionFrom(event.response),
         resolvedAt: event.resolvedAt,
         ruleId: event.ruleId,
+        answers: questionAnswersFrom(event.response),
+        declined: declinedFrom(event.response),
       ),
       InteractionOutcome.expired => r.copyWith(
         status: InteractionStatus.expired,
