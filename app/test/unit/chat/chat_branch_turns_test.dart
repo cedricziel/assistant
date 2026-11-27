@@ -137,6 +137,12 @@ class _FakeApi extends ApiClient {
 
   _FakeConversationsApi get conversationsFake => _conversationsFake;
 
+  @override
+  Future<List<api.InteractionDetail>> listConversationInteractions(
+    String conversationId, {
+    api.InteractionStatusView? status,
+  }) async => const [];
+
   final _sends = <StreamController<StreamEvent>>[];
   final _edits = <StreamController<StreamEvent>>[];
   final _regenerates = <StreamController<StreamEvent>>[];
