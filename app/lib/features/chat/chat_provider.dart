@@ -904,32 +904,63 @@ class ChatNotifier extends AsyncNotifier<ChatState>
   /// Surface actions waiting for the queue drain, in submit order.
   final List<_QueuedSurfaceAction> _surfaceActions = [];
 
-  /// Submit [action] on [surface] after the turn that rendered it ended.
+  /// Submit [action] on [surface].
   ///
-  /// Sent as a new message with an empty text and a `surface_action`, so it
-  /// queues behind a running turn like any other message. The surface shows
-  /// its pending state from now until the server's status `surface_update` (or
-  /// the request's outcome) settles it. In-turn waits go through the
-  /// interaction channel instead.
+  /// While the turn waits on the surface's `surface_action` interaction, the
+  /// action answers it through the respond endpoint and no message starts. A
+  /// `410` means the wait already ended, so the same action goes out on the
+  /// post-turn route. In every other case it is sent as a new message with an
+  /// empty text and a `surface_action`, queued behind a running turn like any
+  /// other message. The surface shows its pending state from now until the
+  /// server's status `surface_update` (or the request's outcome) settles it.
   Future<void> submitSurfaceAction(
     SurfaceRecord surface,
     SurfaceActionSubmission action,
   ) async {
-    final conversationId = state.value?.conversationId;
-    if (conversationId == null ||
+    final current = state.value;
+    final conversationId = current?.conversationId;
+    if (current == null ||
+        conversationId == null ||
         surface.status != SurfaceStatus.active ||
         !surface.answerable) {
       return;
     }
+
+    final interactionId = surface.interactionId;
+    if (interactionId != null) {
+      final record = findInteraction(current.messages, interactionId);
+      if (record?.isOpen ?? false) {
+        _setSurfacePending(surface.surfaceId, true);
+        final handled = await respondSurfaceAction(interactionId, action);
+        if (!ref.mounted) return;
+        _setSurfacePending(surface.surfaceId, false);
+        if (handled) return;
+      }
+    }
+
+    _enqueueSurfaceAction(
+      conversationId: conversationId,
+      surfaceId: surface.surfaceId,
+      title: surface.title,
+      action: action,
+    );
+  }
+
+  void _enqueueSurfaceAction({
+    required String conversationId,
+    required String surfaceId,
+    required String title,
+    required SurfaceActionSubmission action,
+  }) {
     _surfaceActions.add(
       _QueuedSurfaceAction(
         conversationId: conversationId,
-        surfaceId: surface.surfaceId,
-        title: surface.title,
+        surfaceId: surfaceId,
+        title: title,
         action: action,
       ),
     );
-    _setSurfacePending(surface.surfaceId, true);
+    _setSurfacePending(surfaceId, true);
     if (!_session.draining) _drainQueue();
   }
 
@@ -1669,6 +1700,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     final finalState = state.value ?? const ChatState();
     if (!finalState.isSending) return;
     final msgs = List<ChatMessage>.from(finalState.messages);
+    clearSurfaceInteractions(msgs);
     final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
     if (idx != -1) {
       msgs[idx] = ChatMessage(

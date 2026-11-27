@@ -21,6 +21,7 @@ ChatState abortedTurnState(
   if (failedUserMsgId != null) {
     setMessageStatus(msgs, failedUserMsgId, MessageStatus.failed);
   }
+  clearSurfaceInteractions(msgs);
   return from.copyWith(
     messages: msgs,
     isSending: false,
@@ -70,6 +71,7 @@ ChatState completedTurnState(
 }) {
   final msgs = List<ChatMessage>.from(from.messages);
   completeStreamingThinkingEntries(msgs);
+  clearSurfaceInteractions(msgs);
   setMessageStatus(msgs, userMsgId, MessageStatus.ok);
   final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
   if (idx != -1) {

@@ -7,11 +7,16 @@ import 'dart:async';
 
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
+import 'package:assistant_app/api/models/interaction_answer.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
 import 'package:assistant_app/api/models/surface_action.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
+import 'package:assistant_app/features/chat/chat_timeline_entry.dart';
+import 'package:assistant_app/features/chat/interaction_kinds.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
-import 'package:dio/dio.dart' show CancelToken;
+import 'package:built_value/json_object.dart';
+import 'package:dio/dio.dart'
+    show CancelToken, DioException, DioExceptionType, RequestOptions, Response;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -20,6 +25,43 @@ class _FakeApiClient extends ApiClient {
   _FakeApiClient() : super(baseUrl: 'http://fake', token: 'fake');
 
   final List<StreamController<StreamEvent>> _queue = [];
+
+  /// Every answer posted to the respond endpoint, in call order.
+  final List<({String turnId, String interactionId, InteractionAnswer answer})>
+  responses = [];
+
+  /// Failure to throw from the next [respondToInteraction]; null answers.
+  DioException? respondError;
+  Completer<void>? respondGate;
+
+  @override
+  Future<InteractionDetail> respondToInteraction(
+    String conversationId,
+    String turnId,
+    String interactionId,
+    InteractionAnswer answer,
+  ) async {
+    responses.add((
+      turnId: turnId,
+      interactionId: interactionId,
+      answer: answer,
+    ));
+    await respondGate?.future;
+    final error = respondError;
+    if (error != null) throw error;
+    return InteractionDetail(
+      (b) => b
+        ..conversationId = conversationId
+        ..interactionId = interactionId
+        ..kind = 'surface_action'
+        ..rendersCard = false
+        ..runId = turnId
+        ..status = InteractionStatusView.resolved
+        ..createdAt = DateTime.utc(2026)
+        ..expiresAt = DateTime.utc(2026, 1, 1, 0, 10)
+        ..request = JsonObject({}),
+    );
+  }
 
   StreamController<StreamEvent> enqueueStream() {
     final controller = StreamController<StreamEvent>();
@@ -163,6 +205,42 @@ SurfaceActionSubmission _submission() => const SurfaceActionSubmission(
   sourceComponentId: 'button-1',
   context: {'city': 'Berlin'},
   dataModel: {'unit': 'c'},
+);
+
+InteractionRequestedEvent _surfaceInteraction({
+  String id = 'int-surface',
+  String surfaceId = 'surface-1',
+}) => InteractionRequestedEvent(
+  interactionId: id,
+  kind: 'surface_action',
+  createdAt: DateTime.utc(2026),
+  expiresAt: DateTime.utc(2026, 1, 1, 0, 10),
+  rendersCard: false,
+  request: {
+    'surface_id': surfaceId,
+    'title': 'Weather',
+    'actions': ['submit_form'],
+    'send_data_model': true,
+  },
+);
+
+InteractionResolvedEvent _surfaceResolved({
+  String id = 'int-surface',
+  InteractionOutcome outcome = InteractionOutcome.cancelled,
+}) => InteractionResolvedEvent(
+  interactionId: id,
+  kind: 'surface_action',
+  outcome: outcome,
+  resolvedAt: DateTime.utc(2026, 1, 1, 0, 1),
+);
+
+DioException _http(int status) => DioException(
+  requestOptions: RequestOptions(path: ''),
+  response: Response<void>(
+    requestOptions: RequestOptions(path: ''),
+    statusCode: status,
+  ),
+  type: DioExceptionType.badResponse,
 );
 
 void main() {
@@ -457,5 +535,207 @@ void main() {
     expect(entry.surface!.isClosed, isTrue);
     expect(entry.status, MessageStatus.ok);
     expect(notifier.state.value!.error, isNull);
+  });
+
+  // -- PR 18: answer in-turn surface interactions -----------------------------
+
+  testWidgets('an in-turn interaction attaches to its surface, not a card', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    final controller = api.enqueueStream();
+    final notifier = await _pump(tester, api);
+
+    unawaited(notifier.sendMessage('weather?'));
+    await tester.pump();
+    await _deliver(tester, controller, [
+      const RunStartedEvent('run-1'),
+      _surface(),
+      _surfaceInteraction(),
+    ]);
+
+    final state = notifier.state.value!;
+    final entry = _surfaceEntry(state)!;
+    expect(entry.surface!.interactionId, 'int-surface');
+    expect(entry.interaction?.kind, InteractionKind.surfaceAction);
+    expect(
+      timelineEntryState(entry),
+      EntryState.awaitingInput,
+      reason: 'the surface is the card; the entry waits on it',
+    );
+    expect(
+      state.messages.where(
+        (m) => m.timelineType == TimelineEntryType.interaction,
+      ),
+      isEmpty,
+      reason: 'surface_action renders no generic interaction entry',
+    );
+    expect(
+      buildInteractionCard(entry.interaction!, DateTime.utc(2026), (_) {}),
+      isNull,
+      reason: 'the surface frame renders the card instead',
+    );
+    expect(state.currentTurnStatus?.awaitingLabel, 'Waiting for your input');
+    expect(state.lastInteractionRequest?.id, 'int-surface');
+
+    await _finishTurn(tester, controller);
+  });
+
+  testWidgets('an in-turn action posts to the respond endpoint', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    final controller = api.enqueueStream();
+    final notifier = await _pump(tester, api);
+
+    unawaited(notifier.sendMessage('weather?'));
+    await tester.pump();
+    await _deliver(tester, controller, [
+      const RunStartedEvent('run-1'),
+      _surface(),
+      _surfaceInteraction(),
+    ]);
+    final surface = _surfaceEntry(notifier.state.value!)!.surface!;
+
+    api.respondGate = Completer<void>();
+    unawaited(notifier.submitSurfaceAction(surface, _submission()));
+    await tester.pump();
+
+    expect(api.responses, hasLength(1));
+    expect(api.responses.single.interactionId, 'int-surface');
+    final answer = api.responses.single.answer;
+    expect(answer, isA<SurfaceActionAnswer>());
+    expect((answer as SurfaceActionAnswer).action.name, 'submit_form');
+    expect(api.sentMessages, ['weather?'], reason: 'no message starts');
+    expect(api.sentSurfaceActions, [null], reason: 'no post-turn request');
+    expect(
+      _surfaceEntry(notifier.state.value!)!.status,
+      MessageStatus.sending,
+      reason: 'the surface shows pending while the answer is in flight',
+    );
+
+    api.respondGate!.complete();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+    expect(api.sentMessages, ['weather?'], reason: 'still no message');
+
+    await _finishTurn(tester, controller);
+  });
+
+  testWidgets('a 410 on the respond route sends the action post-turn', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    final controller = api.enqueueStream();
+    final notifier = await _pump(tester, api);
+
+    unawaited(notifier.sendMessage('weather?'));
+    await tester.pump();
+    await _deliver(tester, controller, [
+      const RunStartedEvent('run-1'),
+      _surface(),
+      _surfaceInteraction(),
+    ]);
+    final surface = _surfaceEntry(notifier.state.value!)!.surface!;
+
+    final actionTurn = api.enqueueStream();
+    api.respondError = _http(410);
+    unawaited(notifier.submitSurfaceAction(surface, _submission()));
+    await tester.pumpAndSettle();
+
+    expect(api.responses, hasLength(1));
+    expect(api.sentMessages, [
+      'weather?',
+    ], reason: 'the action queues behind the running turn');
+    final entry = _surfaceEntry(notifier.state.value!);
+    expect(entry!.surface!.interactionId, isNull, reason: 'the wait is over');
+    expect(entry.surface!.answerable, isTrue);
+
+    await _finishTurn(tester, controller);
+    await tester.pump();
+    expect(api.sentMessages, ['weather?', '']);
+    expect(api.sentSurfaceActions.last?.name, 'submit_form');
+
+    await _deliver(tester, actionTurn, [
+      const RunStartedEvent('run-2'),
+      _surface(status: 'submitted', messages: const []),
+    ]);
+    await _finishTurn(tester, actionTurn);
+    expect(
+      _surfaceEntry(notifier.state.value!)!.surface!.status,
+      SurfaceStatus.submitted,
+    );
+  });
+
+  testWidgets('after the wait expires, actions use the post-turn route', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    final controller = api.enqueueStream();
+    final notifier = await _pump(tester, api);
+
+    unawaited(notifier.sendMessage('weather?'));
+    await tester.pump();
+    await _deliver(tester, controller, [
+      const RunStartedEvent('run-1'),
+      _surface(),
+      _surfaceInteraction(),
+    ]);
+    await _deliver(tester, controller, [
+      _surfaceResolved(outcome: InteractionOutcome.expired),
+    ]);
+
+    final surface = _surfaceEntry(notifier.state.value!)!.surface!;
+    expect(surface.interactionId, isNull);
+
+    final actionTurn = api.enqueueStream();
+    unawaited(notifier.submitSurfaceAction(surface, _submission()));
+    await tester.pump();
+
+    expect(api.responses, isEmpty, reason: 'nothing waits any more');
+    expect(api.sentMessages, [
+      'weather?',
+    ], reason: 'the action queues behind the running turn');
+    expect(_surfaceEntry(notifier.state.value!)!.status, MessageStatus.sending);
+
+    await _finishTurn(tester, controller);
+    await tester.pump();
+    expect(api.sentMessages, ['weather?', '']);
+    expect(api.sentSurfaceActions.last?.surfaceId, 'surface-1');
+
+    await _finishTurn(tester, actionTurn);
+  });
+
+  testWidgets('after the turn ends, actions use the post-turn route', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    final controller = api.enqueueStream();
+    final notifier = await _pump(tester, api);
+
+    unawaited(notifier.sendMessage('weather?'));
+    await tester.pump();
+    await _deliver(tester, controller, [
+      const RunStartedEvent('run-1'),
+      _surface(),
+      _surfaceInteraction(),
+    ]);
+    await _finishTurn(tester, controller);
+
+    final surface = _surfaceEntry(notifier.state.value!)!.surface!;
+    expect(
+      surface.interactionId,
+      isNull,
+      reason: 'the turn is over, so no interaction can be answered',
+    );
+
+    final actionTurn = api.enqueueStream();
+    unawaited(notifier.submitSurfaceAction(surface, _submission()));
+    await tester.pump();
+
+    expect(api.responses, isEmpty);
+    expect(api.sentMessages, ['weather?', '']);
+
+    await _finishTurn(tester, actionTurn);
   });
 }

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/api_client.dart';
 import '../../api/models/interaction_answer.dart';
 import '../../api/models/stream_event.dart';
+import '../../api/models/surface_action.dart';
 import '../connection/connection_provider.dart';
 import 'chat_models.dart';
 import 'chat_timeline_reducers.dart';
@@ -156,6 +157,89 @@ mixin ChatInteractions on AsyncNotifier<ChatState> {
     } catch (_) {
       if (_sameConversation(epoch)) _restorePending(interactionId, epoch);
     }
+  }
+
+  /// Send a surface [action] to the pending `surface_action` interaction
+  /// [interactionId] of the turn in flight.
+  ///
+  /// The surface is the card, so it shows pending while the request runs.
+  /// Returns false when the wait is already over (a 410): the interaction is
+  /// dropped and the caller sends the same action on the post-turn route.
+  /// A `409` reloads the record and is not retried; any other failure restores
+  /// the pending state and shows [ChatState.error].
+  Future<bool> respondSurfaceAction(
+    String interactionId,
+    SurfaceActionSubmission action,
+  ) async {
+    final current = state.value;
+    final record = current == null
+        ? null
+        : findInteraction(current.messages, interactionId);
+    final api = ref.read(apiClientProvider);
+    final conversationId = current?.conversationId;
+    final runId = current?.currentTurnStatus?.runId;
+    if (current == null ||
+        record == null ||
+        record.status != InteractionStatus.pending ||
+        api == null ||
+        conversationId == null ||
+        runId == null) {
+      return true;
+    }
+
+    final epoch = _conversationEpoch;
+    _setStatus(interactionId, InteractionStatus.submitting);
+    try {
+      await api.respondToInteraction(
+        conversationId,
+        runId,
+        interactionId,
+        SurfaceActionAnswer(action),
+      );
+      return true;
+    } on DioException catch (e) {
+      if (!_sameConversation(epoch)) return true;
+      switch (e.response?.statusCode) {
+        case 410:
+          _endSurfaceInteraction(interactionId, epoch);
+          return false;
+        case 409:
+          await _reload(conversationId, interactionId, epoch);
+          _clearSurfaceInteraction(interactionId, epoch);
+          return true;
+        default:
+          _restorePending(interactionId, epoch);
+          return true;
+      }
+    } catch (_) {
+      if (_sameConversation(epoch)) _restorePending(interactionId, epoch);
+      return true;
+    }
+  }
+
+  /// Drop an interaction the turn no longer waits on: it expired or was
+  /// cancelled before the answer arrived.
+  void _endSurfaceInteraction(String interactionId, int epoch) {
+    if (!_sameConversation(epoch)) return;
+    final current = state.value;
+    if (current == null) return;
+    final msgs = List<ChatMessage>.from(current.messages);
+    updateInteraction(
+      msgs,
+      interactionId,
+      (r) => r.copyWith(status: InteractionStatus.expired),
+    );
+    clearSurfaceInteractions(msgs, interactionId: interactionId);
+    state = AsyncData(withInteractionMessages(current, msgs));
+  }
+
+  void _clearSurfaceInteraction(String interactionId, int epoch) {
+    if (!_sameConversation(epoch)) return;
+    final current = state.value;
+    if (current == null) return;
+    final msgs = List<ChatMessage>.from(current.messages);
+    clearSurfaceInteractions(msgs, interactionId: interactionId);
+    state = AsyncData(withInteractionMessages(current, msgs));
   }
 
   void _setStatus(String id, InteractionStatus status) {

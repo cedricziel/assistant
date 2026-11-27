@@ -452,14 +452,30 @@ String? awaitingLabelOf(List<ChatMessage> msgs) {
   return open == null ? null : interactionKindSpec(open).progressLabel;
 }
 
-/// Show a requested interaction: in the footer of the tool call with its
-/// `tool_call_id`, else as an entry of its own before the reply placeholder.
+/// Show a requested interaction: on the surface it names, else in the footer of
+/// the tool call with its `tool_call_id`, else as an entry of its own before
+/// the reply placeholder.
+///
+/// A `surface_action` interaction is the surface's own card: its record hangs
+/// on the surface entry so the entry state becomes awaiting-input, and no
+/// generic interaction entry or footer card is added.
 void applyInteractionRequested(
   List<ChatMessage> msgs,
   InteractionRequestedEvent event,
 ) {
   if (findInteraction(msgs, event.interactionId) != null) return;
   final record = interactionRecordFromEvent(event);
+  final surfaceId = event.request['surface_id'];
+  if (record.kind == InteractionKind.surfaceAction && surfaceId is String) {
+    final idx = _surfaceEntryIndex(msgs, surfaceId);
+    if (idx != -1) {
+      final surface = msgs[idx].surface!;
+      msgs[idx] = msgs[idx].copyWith(
+        surface: surface.copyWith(interactionId: event.interactionId),
+      )..interaction = record;
+      return;
+    }
+  }
   final callId = event.toolCallId;
   final callIdx = callId == null
       ? -1
@@ -482,6 +498,33 @@ void applyInteractionRequested(
       timelineType: TimelineEntryType.interaction,
     )..interaction = record,
   );
+}
+
+int _surfaceEntryIndex(List<ChatMessage> msgs, String surfaceId) =>
+    msgs.indexWhere(
+      (m) =>
+          m.timelineType == TimelineEntryType.surface &&
+          m.surface?.surfaceId == surfaceId,
+    );
+
+/// Detach the live interaction from the surfaces it waits on: the wait is over,
+/// so their actions use the post-turn route and no pending marker stays on.
+///
+/// With [interactionId], only that interaction's surfaces are detached.
+void clearSurfaceInteractions(List<ChatMessage> msgs, {String? interactionId}) {
+  for (var i = 0; i < msgs.length; i++) {
+    final surface = msgs[i].surface;
+    if (surface == null || surface.interactionId == null) continue;
+    if (interactionId != null && surface.interactionId != interactionId) {
+      continue;
+    }
+    msgs[i] = msgs[i].copyWith(
+      status: msgs[i].status == MessageStatus.sending
+          ? MessageStatus.ok
+          : msgs[i].status,
+      surface: surface.copyWith(clearInteraction: true),
+    );
+  }
 }
 
 /// End an interaction: a receipt for an answer, otherwise expired or
@@ -512,6 +555,7 @@ void applyInteractionResolved(
       ),
     },
   );
+  clearSurfaceInteractions(msgs, interactionId: event.interactionId);
 }
 
 /// Mark every interaction the turn still waits on as cancelled: the turn is
@@ -524,4 +568,5 @@ void cancelOpenInteractions(List<ChatMessage> msgs) {
       (r) => r.copyWith(status: InteractionStatus.cancelled),
     );
   }
+  clearSurfaceInteractions(msgs);
 }
