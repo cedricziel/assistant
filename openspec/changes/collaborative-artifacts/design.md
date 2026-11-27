@@ -132,12 +132,18 @@ The frame is filled by the app, not by a URL that carries its own authority:
   `loadHtmlString` on macOS and iOS — with `sandbox="allow-scripts"` and the
   `<meta>` policy below at the top of the document. The Apple webview also has a
   navigation delegate that refuses every request, so the page cannot leave.
-- Public and org link pages are server-rendered at `/a/{token}` and frame the
-  same document from `/a/{token}/content`. Both revalidate the token, its org and
-  the public-link policy per request.
+- Public and org link pages are server-rendered. `GET /a/{token}` validates the
+  token, sets a short-lived `HttpOnly`, `SameSite=Lax`, `Secure` cookie bound to
+  the link, and redirects to `/a/{link_id}`, so the token never stays in a
+  document URL, a history entry or a referrer. That page revalidates the cookie
+  against the link's revocation, expiry and org policy on each load, and embeds
+  the rendered document as `srcdoc` inside the frame, so the frame has no URL of
+  its own and nothing in it names a credential.
 
-No render URL is signed and no credential travels in a URL, so there is nothing
-in the frame for a script to copy out, and revocation never waits on an expiry.
+No render URL is signed, and the only credential in the system — the share-link
+token — is exchanged once for a cookie and never enters the framed document. A
+script therefore has nothing to copy out, and revocation never waits on an
+expiry.
 
 The frame document carries this policy as a `<meta>` element, because it is
 inserted rather than fetched:
@@ -157,7 +163,7 @@ The `sandbox` attribute (without `allow-same-origin`) gives the document an
 the browser does not attach credentials to requests it makes. `connect-src
 'none'` stops fetch and XHR; `form-action 'none'` stops form posts; `base-uri
 'none'` stops a `<base>` tag from redirecting relative URLs; `object-src 'none'`
-blocks embeds. The `/a/{token}` pages set the same policy, plus
+blocks embeds. The link pages set the same policy, plus
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
 `Cache-Control: no-store`, as response headers.
 
@@ -195,7 +201,7 @@ What is rendered per kind:
 
 Public-link pages are wrapped in a thin server-rendered frame that shows the
 title, version and a "User-generated content" notice above the sandboxed
-iframe.
+iframe, whose document is embedded with `srcdoc`.
 
 ### D5. Roles and resolution (`artifact-sharing`)
 
@@ -335,8 +341,8 @@ content and `media_type`, `metadata = {kind, version, url}`.
 | GET / PUT / DELETE   | `/api/artifacts/{id}/grants[/{user_id}]`        | manage                       |
 | GET / POST / DELETE  | `/api/artifacts/{id}/links[/{link_id}]`         | manage                       |
 | GET / PUT            | `/api/artifacts/policy`                         | org admin                    |
-| GET                  | `/a/{token}` (public)                           | link                         |
-| GET                  | `/a/{token}/content` (public)                   | link                         |
+| GET                  | `/a/{token}` (public)                           | link, redirects to `/a/{id}` |
+| GET                  | `/a/{link_id}` (public)                         | link cookie                  |
 
 Shapes follow `openspec/config.yaml`: `ArtifactSummary`, `ArtifactDetail`,
 `ArtifactVersionSummary`, `ArtifactVersionDetail`, `CreateArtifactRequest`,
@@ -353,8 +359,9 @@ Shapes follow `openspec/config.yaml`: `ArtifactSummary`, `ArtifactDetail`,
   attacker URL. The Apple webview refuses every navigation, so the path is
   closed there; on web the browser gives no way to block a frame navigating
   itself. What leaves is content the viewer can already read on screen, and no
-  credential or API access goes with it — the page holds nothing beyond its own
-  rendered text and has no network channel to spend.
+  credential or API access goes with it — link frames embed the document
+  themselves, so no token is in the frame, and the page holds nothing beyond its
+  own rendered text and has no network channel to spend.
 - **Revocation.** Role and link changes are checked per request, and frames load
   from the authenticated content route rather than a signed URL, so a revoked
   viewer's next load fails immediately. A page already on screen keeps showing

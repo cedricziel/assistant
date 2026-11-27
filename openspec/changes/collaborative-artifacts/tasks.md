@@ -27,7 +27,7 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 ## 4. PR 4 — Sandbox and slides
 
 - [ ] 4.1 Failing route tests for `GET /api/artifacts/{id}/content?format=html`: `html` returns stored markup, `slides` renders the deck, unsupported `format` is 400, and a viewer whose grant was removed between loads gets 404 (confirm RED); implement the render route; GREEN
-- [ ] 4.2 Failing tests for the document wrapper: exact `<meta>` CSP (default-src none, inline-only scripts plus allowlist, data:/blob: media, `connect-src`/`form-action`/`base-uri`/`object-src` `'none'`), bridge injected, and `/a/{token}/content` sending the same policy as headers with `nosniff`, `no-referrer`, `no-store` (confirm RED); implement; GREEN
+- [ ] 4.2 Failing tests for the document wrapper: exact `<meta>` CSP (default-src none, inline-only scripts plus allowlist, data:/blob: media, `connect-src`/`form-action`/`base-uri`/`object-src` `'none'`) and the bridge injected (confirm RED); implement; GREEN
 - [ ] 4.3 Failing tests for `[artifacts] cdn_allowlist` in `server.toml`: default allowlist, empty allowlist blocks CDN scripts (confirm RED); implement config; GREEN
 - [ ] 4.4 Failing tests for the slides renderer: frontmatter parsing, `---` splitting (not inside fenced code), three slides → three sections, print CSS and bridge script present (confirm RED); implement with `pulldown-cmark` and an embedded template; GREEN
 - [ ] 4.5 Render `markdown`/`code`/`data` to HTML for link views; tests first
@@ -42,7 +42,7 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 - [ ] 5.3 Failing unit tests for full `ArtifactAccess::resolve` covering the role matrix (space role × owner × grant × org link; 404 not 403) (confirm RED); implement; GREEN
 - [ ] 5.4 Failing tests for the `ArtifactCtx` extractor: member via `X-Space-Id`, org admin without a membership, grantee without membership, org link token supplied per request, other org → 404 (confirm RED); implement and switch artifact routes and tools to it; GREEN
 - [ ] 5.5 Failing route tests for grants, links, `shared-with-me` and policy (only `manage` changes access; public link 403 when policy off; toggling policy hides and restores links) (confirm RED); implement; GREEN
-- [ ] 5.6 Failing tests for `GET /a/{token}`: pinned version, latest, revoked/expired → 404, org link needs same-org sign-in, disabled policy → 404 immediately, content route revalidates the token, public frame shows the notice (confirm RED); implement in `public_routes`; GREEN
+- [ ] 5.6 Failing tests for `GET /a/{token}`: pinned version, latest, revoked/expired → 404, org link needs same-org sign-in, disabled policy → 404 immediately, token exchanged for an `HttpOnly` cookie and 302 to `/a/{link_id}`, reload revalidates the cookie, frame rendered from `srcdoc` with no token in its URL or referrer, public frame shows the notice (confirm RED); implement in `public_routes`; GREEN
 - [ ] 5.7 `make dump-openapi`; `make generate-flutter-client`
 
 ## 6. PR 6 — Comments and summons

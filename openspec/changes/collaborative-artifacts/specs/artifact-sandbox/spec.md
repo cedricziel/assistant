@@ -14,10 +14,12 @@ through `ArtifactCtx` on every request. The app SHALL insert that document into
 the frame as `srcdoc` on web and `loadHtmlString` on macOS and iOS. No signed
 URL, token or other credential-bearing content URL SHALL exist for app frames.
 
-Public and org link pages SHALL serve the same document at
-`/a/{token}/content`, revalidating the token, its org, the public-link policy and
-the expiry on every request, and SHALL return `404` once the link is revoked or
-expired or the policy is off.
+Public and org link pages SHALL validate the token at `/a/{token}`, set a
+short-lived `HttpOnly`, `SameSite=Lax`, `Secure` cookie bound to the link, and
+redirect to `/a/{link_id}`. That page SHALL revalidate the cookie against the
+link's revocation, expiry and org policy on every load, return `404` when any of
+those fails, and embed the rendered document as `srcdoc` so the frame has no URL
+and no credential inside it.
 
 #### Scenario: Grant revoked while a frame is open
 
@@ -29,8 +31,14 @@ expired or the policy is off.
 #### Scenario: Link revoked or policy disabled
 
 - **GIVEN** a public link `L` was issued and the policy is turned off
-- **WHEN** anyone requests `L`'s content URL
+- **WHEN** anyone reloads `L`'s page
 - **THEN** the response is `404` without waiting for an expiry
+
+#### Scenario: Link frame holds no token
+
+- **WHEN** a script inside a link frame reads its own URL and referrer
+- **THEN** it sees `about:srcdoc` and a page URL without the token, so a
+  navigation out of the frame carries only rendered text
 
 #### Scenario: No URL to copy out
 
