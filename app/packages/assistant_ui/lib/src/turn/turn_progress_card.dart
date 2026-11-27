@@ -17,7 +17,8 @@ const Duration kTurnStallThreshold = Duration(seconds: 30);
 /// from [turnStatusLabel]; once [now] is [kTurnStallThreshold] past
 /// [TurnStatusSnapshot.lastEventAt] it shows [stalledTurnStatusLabel] on an
 /// error-tinted surface, and, when [showSkip] is set, a Skip button that calls
-/// [onSkip].
+/// [onSkip]. While [awaitingLabel] is set, it is shown instead and the turn
+/// never counts as stalled.
 ///
 /// [now] is the clock. The card reads it once a second while [status] is
 /// non-null, so a stall appears without a new event; tests inject a fixed one.
@@ -28,6 +29,7 @@ class TurnProgressCard extends StatefulWidget {
     required this.onSkip,
     this.showSkip = true,
     this.now = DateTime.now,
+    this.awaitingLabel,
   });
 
   /// The active turn's latest activity, or `null` when no turn is in flight.
@@ -41,6 +43,11 @@ class TurnProgressCard extends StatefulWidget {
 
   /// The clock the stall check reads.
   final DateTime Function() now;
+
+  /// What the turn waits for while an interaction is pending, for example
+  /// "Waiting for your approval". It replaces the activity label, and the
+  /// stall label stays hidden however long the wait lasts.
+  final String? awaitingLabel;
 
   @override
   State<TurnProgressCard> createState() => _TurnProgressCardState();
@@ -87,10 +94,11 @@ class _TurnProgressCardState extends State<TurnProgressCard> {
     if (status == null) return const SizedBox.shrink();
 
     final elapsed = _now.difference(status.lastEventAt);
-    final stalled = elapsed >= kTurnStallThreshold;
-    final label = stalled
-        ? stalledTurnStatusLabel(elapsed)
-        : turnStatusLabel(status);
+    final awaiting = widget.awaitingLabel;
+    final stalled = awaiting == null && elapsed >= kTurnStallThreshold;
+    final label =
+        awaiting ??
+        (stalled ? stalledTurnStatusLabel(elapsed) : turnStatusLabel(status));
 
     final colorScheme = Theme.of(context).colorScheme;
     return Padding(

@@ -44,7 +44,7 @@ use crate::errors::json_error;
 use crate::openapi::ErrorBody;
 use crate::space::{Access, SpaceCtx};
 
-use super::conversations::{caller_store, owned_conversation};
+use super::conversations::{MessageTimingSummary, caller_store, owned_conversation};
 use super::{ApiState, sse_response};
 
 /// Whether the caller may post a message / start a turn — gated on the
@@ -627,12 +627,13 @@ pub(crate) async fn stream_turn_to_sse(
             },
             Errored(String),
         }
-        let (mut reply_text, reply_message_id, reply_attachment_ids, terminal) =
+        let (mut reply_text, reply_message_id, reply_attachment_ids, reply_timing, terminal) =
             match run_events.into_turn_result().await {
                 Ok(Ok(result)) => (
                     result.answer,
                     result.message_id,
                     result.attachment_ids,
+                    result.timing,
                     TerminalKind::Done,
                 ),
                 Ok(Err(e)) => {
@@ -645,12 +646,13 @@ pub(crate) async fn stream_turn_to_sse(
                     } else {
                         TerminalKind::Errored(msg)
                     };
-                    (full_text, None, vec![], kind)
+                    (full_text, None, vec![], None, kind)
                 }
                 Err(_) => (
                     full_text,
                     None,
                     vec![],
+                    None,
                     TerminalKind::Errored("submit_turn channel dropped".to_string()),
                 ),
             };
@@ -739,21 +741,17 @@ pub(crate) async fn stream_turn_to_sse(
 
         let (event_type, payload) = match &terminal {
             TerminalKind::Done => {
-                let mut done_data = serde_json::json!({
-                    "role": "assistant",
-                    "content": reply_text,
-                });
-                if let Some(mid) = reply_message_id {
-                    done_data["message_id"] = serde_json::Value::String(mid.to_string());
-                }
-                if !reply_attachment_ids.is_empty() {
-                    done_data["attachment_ids"] = serde_json::json!(
-                        reply_attachment_ids
-                            .iter()
-                            .map(|id| id.to_string())
-                            .collect::<Vec<_>>()
-                    );
-                }
+                let done = SseDoneEvent {
+                    role: "assistant",
+                    content: reply_text.clone(),
+                    message_id: reply_message_id.map(|id| id.to_string()),
+                    attachment_ids: reply_attachment_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect(),
+                    timing: reply_timing.as_ref().map(MessageTimingSummary::from),
+                };
+                let done_data = serde_json::to_value(&done).unwrap_or_default();
                 ("done", done_data)
             }
             TerminalKind::Cancelled { before_start } => {
@@ -1007,6 +1005,24 @@ pub struct StreamRunEventsQuery {
 pub struct SseTokenEvent {
     /// The text content of this token chunk.
     pub content: String,
+}
+
+/// SSE `done` event: the finished reply, the last frame of a successful turn.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SseDoneEvent {
+    /// Always `assistant`.
+    pub role: &'static str,
+    /// The full reply text.
+    pub content: String,
+    /// The saved assistant message. Absent when the turn saved none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    /// Attachments the reply produced. Omitted when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attachment_ids: Vec<String>,
+    /// How long the turn took. Absent when none was measured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<MessageTimingSummary>,
 }
 
 /// SSE `thinking` event — a thinking/reasoning token from the model.
@@ -1909,6 +1925,70 @@ mod tests {
         );
     }
 
+    /// The done frame of a web turn carries the turn's timing, and the same
+    /// object comes back when the run is replayed.
+    #[tokio::test]
+    async fn send_message_done_event_carries_timing_and_replays_it() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Hello world").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Timing")).await.unwrap();
+
+        let resp = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{}/messages", conv.id))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"message":"hi"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let run_id = resp.headers()["x-run-id"].to_str().unwrap().to_string();
+        let live = done_payload(&String::from_utf8_lossy(
+            &body_bytes(resp.into_body()).await,
+        ));
+
+        assert!(live["timing"]["total_ms"].is_u64(), "got: {live}");
+        for (key, value) in live["timing"].as_object().unwrap() {
+            assert!(!value.is_null(), "{key} must be omitted, not null");
+        }
+
+        let replay = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/conversations/{}/runs/{run_id}/events/stream?since=0",
+                        conv.id
+                    ))
+                    .header("Authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let replayed = done_payload(&String::from_utf8_lossy(
+            &body_bytes(replay.into_body()).await,
+        ));
+        assert_eq!(
+            replayed["timing"], live["timing"],
+            "replay returns the same timing"
+        );
+    }
+
+    /// The `done` payload of the `event: done` frame in an SSE body.
+    fn done_payload(sse: &str) -> serde_json::Value {
+        let data = sse
+            .split("\n\n")
+            .find(|frame| frame.contains("event: done"))
+            .and_then(|frame| frame.lines().find_map(|l| l.strip_prefix("data:")))
+            .expect("a done frame");
+        serde_json::from_str(data.trim()).expect("valid JSON")
+    }
+
     // -- RunOptions::web_turn ---------------------------------------------------
 
     fn web_anchors() -> [TurnAnchor; 3] {
@@ -2612,6 +2692,51 @@ mod tests {
             serde_json::json!([attachment_id.to_string()])
         );
         assert_eq!(event_log(&storage, &run_id).await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn runner_done_frame_carries_timing_and_omits_absent_fields() {
+        let (state, storage) = event_log_state().await;
+        let result = assistant_runtime::TurnResult {
+            message_id: Some(Uuid::new_v4()),
+            timing: Some(assistant_core::TurnTiming {
+                time_to_first_token_ms: Some(800),
+                total_ms: 3000,
+                output_tokens: None,
+                decode_ms: None,
+            }),
+            ..turn_result("answer")
+        };
+
+        let (run_id, frames) =
+            run_runner(&state, &storage, NO_SUGGESTIONS, vec![], Some(Ok(result))).await;
+
+        let (_, data, _) = frames.last().unwrap();
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        let expected = serde_json::json!({"time_to_first_token_ms": 800, "total_ms": 3000});
+        assert_eq!(payload["timing"], expected, "absent fields are omitted");
+        let log = event_log(&storage, &run_id).await;
+        let (_, kind, logged) = log.last().unwrap();
+        assert_eq!(kind, "done");
+        assert_eq!(logged["timing"], expected, "the log keeps the live payload");
+    }
+
+    #[tokio::test]
+    async fn runner_done_frame_without_timing_has_no_timing_key() {
+        let (state, storage) = event_log_state().await;
+
+        let (_, frames) = run_runner(
+            &state,
+            &storage,
+            NO_SUGGESTIONS,
+            vec![],
+            Some(Ok(turn_result("answer"))),
+        )
+        .await;
+
+        let (_, data, _) = frames.last().unwrap();
+        let payload: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert!(payload.get("timing").is_none(), "got: {payload}");
     }
 
     #[tokio::test]
@@ -3612,6 +3737,30 @@ mod tests {
             uuid::Uuid::parse_str(mid).is_ok(),
             "message_id should be a valid UUID, got: {mid}"
         );
+    }
+
+    #[tokio::test]
+    async fn send_voice_message_done_event_carries_timing() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "Voice reply").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store
+            .create_conversation(Some("VoiceTiming"))
+            .await
+            .unwrap();
+        let state = ApiState {
+            transcription_provider: Some(Arc::new(StubTranscriptionProvider {
+                transcript: "hello from voice".to_string(),
+            })),
+            ..state
+        };
+
+        let text = post_voice(state, conv.id).await;
+
+        let done = done_payload(&text);
+        assert!(done["timing"]["total_ms"].is_u64(), "got: {done}");
     }
 
     #[tokio::test]

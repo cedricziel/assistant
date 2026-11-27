@@ -25,6 +25,7 @@ class TurnStatusSnapshot {
     required this.lastEventKind,
     required this.lastEventAt,
     this.currentToolName,
+    this.awaitingLabel,
   });
 
   /// The run ID of the active turn — server-issued, captured from
@@ -43,12 +44,19 @@ class TurnStatusSnapshot {
   /// resumes producing text (`TokenEvent`).
   final String? currentToolName;
 
+  /// What the turn waits for while an interaction is pending, such as
+  /// "Waiting for your approval". Null otherwise. There is deliberately no
+  /// [TurnEventKind] for it: the progress card swaps its label instead.
+  final String? awaitingLabel;
+
   TurnStatusSnapshot copyWith({
     String? runId,
     TurnEventKind? lastEventKind,
     DateTime? lastEventAt,
     String? currentToolName,
     bool clearToolName = false,
+    String? awaitingLabel,
+    bool clearAwaitingLabel = false,
   }) {
     return TurnStatusSnapshot(
       runId: runId ?? this.runId,
@@ -57,6 +65,9 @@ class TurnStatusSnapshot {
       currentToolName: clearToolName
           ? null
           : (currentToolName ?? this.currentToolName),
+      awaitingLabel: clearAwaitingLabel
+          ? null
+          : (awaitingLabel ?? this.awaitingLabel),
     );
   }
 }

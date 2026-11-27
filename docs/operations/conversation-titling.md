@@ -18,8 +18,9 @@ Any interface    ┌──────────────────┐
                                          │  • check eligibility│
                                          │  • call LLM (short  │
                                          │    summary prompt)  │
-                                         │  • update_title     │
-                                         │    sets title_locked│
+                                         │  • set_generated_   │
+                                         │    title (only if   │
+                                         │    still unlocked)  │
                                          │  • broadcasts       │
                                          │    ConversationUp-  │
                                          │    serted to UIs    │
@@ -27,7 +28,9 @@ Any interface    ┌──────────────────┐
 ```
 
 Each conversation row in SQLite gains a `title_locked` boolean. The worker
-will never overwrite a row where `title_locked = 1`. That flag is set:
+will never overwrite a row where `title_locked = 1`. It writes through a
+conditional update (`set_generated_title`), so a manual rename that lands while
+the LLM call is in flight wins. That flag is set:
 
 - when a user (or another caller) sets a title via `PATCH /api/conversations/{id}`,
 - when a client creates a conversation with an explicit title via
