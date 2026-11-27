@@ -23,6 +23,7 @@ import 'chat_send_message.dart';
 import 'chat_thread_pane.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
+import 'message_feedback_provider.dart';
 import 'queued_message_remove_sheet.dart';
 import 'voice_recorder_button.dart';
 
@@ -147,6 +148,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _pickImages() => pickChatAttachments(ref, context);
 
+  /// Shows a failed feedback vote as a snackbar rather than the persistent
+  /// thread error banner: the selection was already rolled back and the
+  /// message is transient.
+  void _showFeedbackError(String? previous, String? next) {
+    if (next == null || next == previous || next != kFeedbackSaveErrorMessage) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(next)));
+      ref.read(chatProvider.notifier).dismissError();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // Retry loading the conversation once the API client becomes available.
@@ -160,9 +175,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     final chatAsync = ref.watch(chatProvider);
     final chatState = chatAsync.value ?? const ChatState();
+    // Thumbs, pending sends and the comment field are per-message feedback
+    // state, independent of the conversation list.
+    final feedbackState = ref.watch(messageFeedbackControllerProvider);
     // Tell the thread viewport that something changed; it follows only if the
     // user is at the bottom.
-    ref.listen(chatProvider, (_, _) => _revision++);
+    ref.listen(chatProvider, (previous, next) {
+      _revision++;
+      _showFeedbackError(previous?.value?.error, next.value?.error);
+    });
 
     final personasAsync = ref.watch(personasProvider);
     final activePersonaName =
@@ -261,7 +282,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     child: ChatThreadPane(
                       chatState: chatState,
                       banners: [
-                        if (chatState.error != null)
+                        if (chatState.error != null &&
+                            chatState.error != kFeedbackSaveErrorMessage)
                           ThreadErrorBanner(
                             message: chatState.error!,
                             onDismiss: ref
@@ -281,6 +303,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       inputFocus: _inputFocus,
                       activePersonaName: activePersonaName,
                       showResponseTiming: showResponseTiming,
+                      feedbackState: feedbackState,
+                      onFeedbackChanged: (message, rating) => ref
+                          .read(chatProvider.notifier)
+                          .setMessageRating(message.id, rating),
+                      onSubmitFeedbackComment: (message, comment) => ref
+                          .read(chatProvider.notifier)
+                          .submitMessageFeedbackComment(message.id, comment),
+                      onDismissFeedbackComment: (message) => ref
+                          .read(chatProvider.notifier)
+                          .dismissMessageFeedbackComment(message.id),
                       showSkip: kSkipButtonEnabled,
                       showVoice: capabilities.voiceSend,
                       voiceButton: VoiceRecorderButton(

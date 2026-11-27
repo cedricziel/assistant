@@ -10,6 +10,7 @@ import 'chat_provider.dart';
 import 'chat_timeline_entry.dart';
 import 'follow_up_chips.dart';
 import 'message_bubble.dart';
+import 'message_feedback_provider.dart';
 import 'reconnect_banner.dart';
 
 /// The conversation surface of [ChatScreen]: the thread, its banners, the
@@ -40,6 +41,10 @@ class ChatThreadPane extends StatelessWidget {
     required this.onInteractionAnswer,
     required this.onRetry,
     required this.fetchMessageAudio,
+    required this.feedbackState,
+    required this.onFeedbackChanged,
+    required this.onSubmitFeedbackComment,
+    required this.onDismissFeedbackComment,
     this.showResponseTiming = false,
     this.showSkip = true,
     this.showVoice = false,
@@ -82,6 +87,14 @@ class ChatThreadPane extends StatelessWidget {
   final void Function(ChatMessage message) onRetry;
   final Future<({Uint8List bytes, String mimeType})?> Function(ChatMessage)
   fetchMessageAudio;
+
+  /// Per-message feedback state: pending votes and open comment fields.
+  final MessageFeedbackState feedbackState;
+  final void Function(ChatMessage message, MessageRating? rating)
+  onFeedbackChanged;
+  final void Function(ChatMessage message, String comment)
+  onSubmitFeedbackComment;
+  final void Function(ChatMessage message) onDismissFeedbackComment;
 
   @override
   Widget build(BuildContext context) {
@@ -157,6 +170,18 @@ class ChatThreadPane extends StatelessWidget {
       isGrouped: isGrouped,
       capabilities: capabilities,
       showResponseTiming: showResponseTiming,
+      onFeedbackChanged: (rating) => onFeedbackChanged(message, rating),
+      feedbackComment: feedbackState.commentFields[message.id] == null
+          ? null
+          : FeedbackCommentField(
+              key: ValueKey(
+                'feedback_comment_${message.id}_${feedbackState.commentFields[message.id]}',
+              ),
+              initialText: message.feedback?.comment,
+              sending: feedbackState.pending.containsKey(message.id),
+              onSubmit: (comment) => onSubmitFeedbackComment(message, comment),
+              onDismiss: () => onDismissFeedbackComment(message),
+            ),
       onRetry: message.status == MessageStatus.failed
           ? () => onRetry(message)
           : null,
