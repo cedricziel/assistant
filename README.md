@@ -482,6 +482,7 @@ See `crates/interface-signal/README.md` for setup and device linking details.
 | [OpenAI provider](docs/openai.md)              | API key and OAuth PKCE auth, Azure/vLLM compatibility |
 | [Moonshot provider](docs/moonshot.md)          | Kimi K2/K2.5 models, regional endpoints               |
 | [Web UI](docs/web-ui.md)                       | Flutter web host, REST API, and A2A protocol server   |
+| [Tool result views](docs/tool-result-views.md) | Render contracts, tool status, and chat result views   |
 | [Authentication](docs/authentication.md)       | Web UI token auth, cookie flow, and A2A security      |
 | [Message bus](docs/messaging.md)               | Durable topic-based message bus architecture          |
 | [Voice transcription](docs/transcription.md)   | Whisper, Ollama, and Deepgram transcription providers |

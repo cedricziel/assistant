@@ -18,7 +18,7 @@ This file is maintained here, next to the package. Adding an element without add
 
 The list keeps the old numbering. Three prerequisites are now owned by siblings.
 
-- **P1: tool structured data.** `ToolOutput.data` is discarded when building `OrchestratorEvent::ToolResult` (`crates/runtime/src/orchestrator/dispatch.rs:283,452`), which carries only a truncated `result` string. **Owned by tool-result-renderers.** It renders through `ToolResultRendererScope` (PR 6), installed by the app as `ToolResultRendererScope(resolve: registry.build)`.
+- **P1: tool structured data.** **Delivered by tool-result-renderers.** `ToolOutput.data` reaches `OrchestratorEvent::ToolResult`, is persisted on the tool row and renders through `ToolResultRendererScope`, installed by the app as `ToolResultRendererScope(resolve: registry.build)`.
 - **P2: client→server return channel.** `ConfirmationCallback::confirm()` is synchronous (`crates/runtime/src/orchestrator/mod.rs:53`), and web turns hardwire `AutoDenyConfirmation` (`crates/web-ui/src/lib.rs:329`, `space_tasks.rs:157`). **Owned by tool-approval-prompts** (the interaction channel). It renders through the tool call entry footer (`TimelineEntryShell.footer`, forwarded by `TimelineEntryView`) and `EntryState.awaitingInput`.
 - **P3: agent-composed UI.** **Owned by generative-ui-a2ui** (A2UI protocol and Flutter genui). It renders through its own `SurfaceFrame` hosted in the shell `body` slot and `MessageBubble.extensions`.
 - **P4: live per-conversation token usage.** Nothing on the web API reports token usage: `grep -rn "token_usage\|input_tokens" crates/web-ui/src app/lib` is empty. The only token figure in the runtime is the compaction estimate (`crates/runtime/src/compaction.rs:64`). chat-a11y-and-code-blocks adds per-message timing, including tokens per second. That covers part of P4, but not a context fill level.
@@ -61,7 +61,7 @@ The list keeps the old numbering. Three prerequisites are now owned by siblings.
 | --- | ---------------- | ------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | 15  | Web search       | Adopt (have) | `SourcesResultView`                          | `sources` contract over `web-search` `.data`. C4.                                        |
 | 16  | Sources          | Adopt (have) | `SourcesResultView`, `LinkPreviewResultView` | `sources` and `link_preview` contracts over `web-search` and `web-fetch` `.data`. C4, C5. |
-| 17  | Inline citation  | **Defer**                           | —                                                      | Prerequisite **P1** (structured data), plus the model emitting citation markers in message text. A candidate for `MessageBubble.extensions` later. |
+| 17  | Inline citation  | **Defer**                           | —                                                      | Needs the model to emit citation markers in message text. A candidate for `MessageBubble.extensions` later. |
 | 18  | Image generation | Adopt (have)                        | `MessageBubble.attachments` slot                       | The app supplies `MessageAttachments` (I/O: `http`, `cached_network_image`, share). PR 8b.                                                         |
 
 ## Structured output (2)
