@@ -9,6 +9,7 @@ import 'package:assistant_api/assistant_api.dart'
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/interaction_answer.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
+import 'package:assistant_app/api/models/surface_action.dart';
 import 'package:assistant_app/features/chat/chat_announcer.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
@@ -28,6 +29,7 @@ class _FakeApi extends ApiClient {
     String conversationId,
     String message, {
     List<String>? attachmentIds,
+    SurfaceActionSubmission? surfaceAction,
   }) => stream.stream;
 
   @override

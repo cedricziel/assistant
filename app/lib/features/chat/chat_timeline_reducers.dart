@@ -190,13 +190,16 @@ void applySurfaceUpdateEvent(List<ChatMessage> msgs, SurfaceUpdateEvent event) {
   );
   if (idx != -1) {
     final prev = msgs[idx].surface!;
+    final submitted = status == SurfaceStatus.submitted;
     msgs[idx] = msgs[idx].copyWith(
+      status: submitted ? MessageStatus.ok : msgs[idx].status,
       surface: prev.copyWith(
         title: event.title.isEmpty ? prev.title : event.title,
         fallbackText: event.fallbackText.isEmpty
             ? prev.fallbackText
             : event.fallbackText,
         status: status,
+        answerable: submitted ? false : prev.answerable,
         messages: event.messages.isEmpty ? prev.messages : event.messages,
       ),
     );
@@ -228,15 +231,75 @@ void applySurfaceUpdateEvent(List<ChatMessage> msgs, SurfaceUpdateEvent event) {
 /// Close every answerable surface in place: a user message follows its anchor,
 /// so it is read-only from now on (design D12). The status stays `active`; the
 /// frame reads "Closed".
-void closeActiveSurfaces(List<ChatMessage> msgs) {
+///
+/// A surface action's own turn passes its surface as [exceptSurfaceId]: that
+/// surface is settled by the server's status frame, not closed by the turn.
+void closeActiveSurfaces(List<ChatMessage> msgs, {String? exceptSurfaceId}) {
   for (var i = 0; i < msgs.length; i++) {
     final surface = msgs[i].surface;
     if (surface == null ||
+        surface.surfaceId == exceptSurfaceId ||
         surface.status != SurfaceStatus.active ||
         !surface.answerable) {
       continue;
     }
     msgs[i] = msgs[i].copyWith(surface: surface.copyWith(answerable: false));
+  }
+}
+
+/// Show or clear the pending state of the surface timeline entry [surfaceId].
+///
+/// A post-turn action marks its surface pending while the request waits in the
+/// queue and runs; its status `surface_update` or the turn's outcome clears it.
+void markSurfacePending(
+  List<ChatMessage> msgs,
+  String surfaceId, {
+  required bool pending,
+}) {
+  final idx = msgs.indexWhere(
+    (m) =>
+        m.timelineType == TimelineEntryType.surface &&
+        m.surface?.surfaceId == surfaceId,
+  );
+  if (idx == -1) return;
+  final next = pending ? MessageStatus.sending : MessageStatus.ok;
+  if (msgs[idx].status == next) return;
+  msgs[idx] = msgs[idx].copyWith(status: next);
+}
+
+/// Settle the surface [surfaceId] after its post-turn action was rejected.
+///
+/// A 409 means another route already submitted it, so it reads submitted. A
+/// 410 means a later user turn closed it. Any other status leaves it active;
+/// only the pending marker is cleared so the user can try again.
+void settleRejectedSurfaceAction(
+  List<ChatMessage> msgs,
+  String surfaceId,
+  int? statusCode,
+) {
+  final idx = msgs.indexWhere(
+    (m) =>
+        m.timelineType == TimelineEntryType.surface &&
+        m.surface?.surfaceId == surfaceId,
+  );
+  if (idx == -1) return;
+  final prev = msgs[idx].surface!;
+  switch (statusCode) {
+    case 409:
+      msgs[idx] = msgs[idx].copyWith(
+        status: MessageStatus.ok,
+        surface: prev.copyWith(
+          status: SurfaceStatus.submitted,
+          answerable: false,
+        ),
+      );
+    case 410:
+      msgs[idx] = msgs[idx].copyWith(
+        status: MessageStatus.ok,
+        surface: prev.copyWith(answerable: false),
+      );
+    default:
+      markSurfacePending(msgs, surfaceId, pending: false);
   }
 }
 

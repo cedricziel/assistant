@@ -342,6 +342,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           ),
                       onInteractionAnswer: (id, answer) =>
                           ref.read(chatProvider.notifier).respond(id, answer),
+                      onSurfaceAction: (surface, action) => ref
+                          .read(chatProvider.notifier)
+                          .submitSurfaceAction(surface, action),
                       onRetry: (message) =>
                           ref.read(chatProvider.notifier).retryMessage(message),
                       fetchMessageAudio: (message) {

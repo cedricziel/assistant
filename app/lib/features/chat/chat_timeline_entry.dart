@@ -3,6 +3,7 @@ import 'package:assistant_ui/models.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../api/models/interaction_answer.dart';
+import '../../api/models/surface_action.dart';
 import 'a2ui/surface_entry.dart';
 import 'interaction_footer.dart';
 import 'mcp_app_frame.dart';
@@ -30,6 +31,7 @@ class ChatTimelineEntry extends StatelessWidget {
     this.entryState = EntryState.complete,
     this.conversationId,
     this.onInteractionAnswer,
+    this.onSurfaceAction,
   });
 
   final ChatMessage message;
@@ -42,12 +44,21 @@ class ChatTimelineEntry extends StatelessWidget {
   final void Function(String interactionId, InteractionAnswer answer)?
   onInteractionAnswer;
 
+  /// Called when the user triggers an A2UI action on a surface entry.
+  final void Function(SurfaceRecord surface, SurfaceActionSubmission action)?
+  onSurfaceAction;
+
   @override
   Widget build(BuildContext context) {
     if (message.timelineType == TimelineEntryType.surface) {
       final surface = message.surface;
       if (surface == null) return const SizedBox.shrink();
-      return SurfaceEntry(surface: surface, entryState: entryState);
+      return SurfaceEntry(
+        surface: surface,
+        entryState: entryState,
+        pending: message.status == MessageStatus.sending,
+        onAction: onSurfaceAction,
+      );
     }
     return TimelineEntryView(
       message: message,
