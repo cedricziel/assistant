@@ -645,6 +645,7 @@ mod tests {
     use assistant_llm_provider::scripted::ScriptedLlmProvider;
     use assistant_storage::{
         ConversationStore, InMemoryConversationStore, InMemoryConversationSummaryStore,
+        InMemoryMessageFeedbackStore, MessageFeedbackRating, MessageFeedbackStore,
     };
     use uuid::Uuid;
 
@@ -808,6 +809,59 @@ mod tests {
             .expect("a summary row is recorded");
         assert_eq!(summary.through_message_id, ids[3]);
         assert_eq!(summary.content, "compacted summary");
+    }
+
+    /// A user's vote must outlive compaction: the visible feedback UI ships
+    /// only because compaction no longer deletes and re-inserts messages, and
+    /// the feedback table cascades from `messages`.
+    #[tokio::test]
+    async fn maybe_compact_keeps_feedback_on_a_surviving_message() {
+        let llm: Arc<dyn LlmProvider> =
+            Arc::new(ScriptedLlmProvider::new().with_canned_responses(vec![
+                LlmResponse::FinalAnswer("compacted summary".into(), LlmResponseMeta::default()),
+            ]));
+        let conv_store = InMemoryConversationStore::new();
+        let summaries = InMemoryConversationSummaryStore::new();
+        let feedback = InMemoryMessageFeedbackStore::new();
+        let cfg = cfg(true, 200_000, 20_000, 30_000, 1);
+        let (conv_id, ids, mut history) = stored_history(&conv_store).await;
+
+        // ids[1] is in the prefix the summary replaces in the context window.
+        feedback
+            .set(
+                conv_id,
+                ids[1],
+                "user-1",
+                MessageFeedbackRating::Positive,
+                Some("clear"),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            maybe_compact(&mut history, &llm, &cfg, Some((&summaries, conv_id))).await,
+            "the history is compacted for the next turn"
+        );
+
+        let stored_ids: Vec<_> = conv_store
+            .load_history(conv_id)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            stored_ids, ids,
+            "compaction must not delete or rewrite stored messages"
+        );
+        let row = feedback
+            .get(ids[1], "user-1")
+            .await
+            .unwrap()
+            .expect("the vote survives compaction on the same message id");
+        assert_eq!(row.message_id, ids[1]);
+        assert_eq!(row.rating, MessageFeedbackRating::Positive);
+        assert_eq!(row.comment.as_deref(), Some("clear"));
     }
 
     #[tokio::test]

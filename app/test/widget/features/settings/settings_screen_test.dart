@@ -30,13 +30,14 @@ void main() {
   }
 
   group('SettingsScreen – Notifications section', () {
-    testWidgets('renders all three notification toggles', (tester) async {
+    testWidgets('renders all four notification toggles', (tester) async {
       await tester.pumpWidget(buildUnderTest());
       await tester.pump(); // let async provider load
 
       expect(find.text('New chat messages'), findsOneWidget);
       expect(find.text('Skill completions'), findsOneWidget);
       expect(find.text('Agent errors'), findsOneWidget);
+      expect(find.text('Approval requests'), findsOneWidget);
     });
 
     testWidgets('toggles are on by default', (tester) async {
@@ -47,6 +48,7 @@ void main() {
         'New chat messages',
         'Skill completions',
         'Agent errors',
+        'Approval requests',
       ]) {
         final sw = tester.widget<Switch>(
           find.descendant(
@@ -77,6 +79,25 @@ void main() {
       // Re-read the persisted value.
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('notifications.chat_messages'), isFalse);
+    });
+
+    testWidgets('tapping "Approval requests" turns it off and persists', (
+      tester,
+    ) async {
+      await tester.pumpWidget(buildUnderTest());
+      await tester.pump();
+
+      final tile = find.ancestor(
+        of: find.text('Approval requests'),
+        matching: find.byType(SwitchListTile),
+      );
+      await tester.ensureVisible(tile);
+      await tester.pumpAndSettle();
+      await tester.tap(tile);
+      await tester.pump();
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('notifications.approval_requests'), isFalse);
     });
   });
 
