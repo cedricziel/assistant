@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
+import 'package:assistant_app/api/models/surface_action.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:dio/dio.dart' show CancelToken;
@@ -28,13 +29,18 @@ class _FakeApiClient extends ApiClient {
 
   final List<String> sentMessages = [];
 
+  /// The surface action each `streamMessages` call carried, in call order.
+  final List<SurfaceActionSubmission?> sentSurfaceActions = [];
+
   @override
   Stream<StreamEvent> streamMessages(
     String conversationId,
     String message, {
     List<String>? attachmentIds,
+    SurfaceActionSubmission? surfaceAction,
   }) {
     sentMessages.add(message);
+    sentSurfaceActions.add(surfaceAction);
     if (_queue.isNotEmpty) return _queue.removeAt(0).stream;
     return const Stream.empty();
   }
@@ -150,6 +156,14 @@ ChatMessage? _surfaceEntry(ChatState state) {
   }
   return null;
 }
+
+SurfaceActionSubmission _submission() => const SurfaceActionSubmission(
+  surfaceId: 'surface-1',
+  name: 'submit_form',
+  sourceComponentId: 'button-1',
+  context: {'city': 'Berlin'},
+  dataModel: {'unit': 'c'},
+);
 
 void main() {
   testWidgets('a live surface_update adds a surface entry', (tester) async {
@@ -337,5 +351,111 @@ void main() {
     );
 
     await _finishTurn(tester, controller);
+  });
+
+  // -- PR 17: post-turn surface actions --------------------------------------
+
+  testWidgets('an action waits in the queue and shows pending', (tester) async {
+    final api = _FakeApiClient();
+    final controller = api.enqueueStream();
+    final notifier = await _pump(tester, api);
+
+    unawaited(notifier.sendMessage('weather?'));
+    await tester.pump();
+    await _deliver(tester, controller, [_surface()]);
+    final surface = _surfaceEntry(notifier.state.value!)!.surface!;
+
+    unawaited(notifier.submitSurfaceAction(surface, _submission()));
+    await tester.pump();
+
+    expect(api.sentMessages, [
+      'weather?',
+    ], reason: 'the running turn is not interrupted');
+    expect(_surfaceEntry(notifier.state.value!)!.status, MessageStatus.sending);
+
+    final actionTurn = api.enqueueStream();
+    await _finishTurn(tester, controller);
+    await tester.pump();
+
+    expect(api.sentMessages, ['weather?', '']);
+    expect(api.sentSurfaceActions.last?.surfaceId, 'surface-1');
+    expect(api.sentSurfaceActions.last?.name, 'submit_form');
+    expect(_surfaceEntry(notifier.state.value!)!.status, MessageStatus.sending);
+
+    await _deliver(tester, actionTurn, [
+      const RunStartedEvent('run-2'),
+      _surface(status: 'submitted', messages: const []),
+    ]);
+
+    final entry = _surfaceEntry(notifier.state.value!);
+    expect(entry!.surface!.status, SurfaceStatus.submitted);
+    expect(entry.surface!.answerable, isFalse);
+    expect(entry.status, MessageStatus.ok, reason: 'pending clears');
+
+    final viaForm = notifier.state.value!.messages.firstWhere((m) => m.viaForm);
+    expect(viaForm.content, 'Submitted “Weather”');
+
+    await _finishTurn(tester, actionTurn);
+  });
+
+  testWidgets('a 409 marks the surface submitted and does not retry', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    final first = api.enqueueStream();
+    final notifier = await _pump(tester, api);
+
+    unawaited(notifier.sendMessage('weather?'));
+    await tester.pump();
+    await _deliver(tester, first, [_surface()]);
+    await _finishTurn(tester, first);
+    final surface = _surfaceEntry(notifier.state.value!)!.surface!;
+
+    final actionTurn = api.enqueueStream();
+    unawaited(notifier.submitSurfaceAction(surface, _submission()));
+    await tester.pump();
+    await _deliver(tester, actionTurn, [
+      const ErrorEvent('The surface was already submitted', statusCode: 409),
+    ]);
+    await tester.runAsync(actionTurn.close);
+    await tester.pumpAndSettle();
+
+    expect(api.sentMessages, ['weather?', ''], reason: 'no retry');
+    final entry = _surfaceEntry(notifier.state.value!);
+    expect(entry!.surface!.status, SurfaceStatus.submitted);
+    expect(entry.surface!.answerable, isFalse);
+    expect(entry.status, MessageStatus.ok);
+    expect(notifier.state.value!.error, isNull);
+  });
+
+  testWidgets('a 410 marks the surface closed and does not retry', (
+    tester,
+  ) async {
+    final api = _FakeApiClient();
+    final first = api.enqueueStream();
+    final notifier = await _pump(tester, api);
+
+    unawaited(notifier.sendMessage('weather?'));
+    await tester.pump();
+    await _deliver(tester, first, [_surface()]);
+    await _finishTurn(tester, first);
+    final surface = _surfaceEntry(notifier.state.value!)!.surface!;
+
+    final actionTurn = api.enqueueStream();
+    unawaited(notifier.submitSurfaceAction(surface, _submission()));
+    await tester.pump();
+    await _deliver(tester, actionTurn, [
+      const ErrorEvent('A later turn started', statusCode: 410),
+    ]);
+    await tester.runAsync(actionTurn.close);
+    await tester.pumpAndSettle();
+
+    expect(api.sentMessages, ['weather?', ''], reason: 'no retry');
+    final entry = _surfaceEntry(notifier.state.value!);
+    expect(entry!.surface!.status, SurfaceStatus.active);
+    expect(entry.surface!.answerable, isFalse);
+    expect(entry.surface!.isClosed, isTrue);
+    expect(entry.status, MessageStatus.ok);
+    expect(notifier.state.value!.error, isNull);
   });
 }

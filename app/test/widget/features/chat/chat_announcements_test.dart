@@ -6,6 +6,7 @@ import 'package:assistant_app/api/capabilities_provider.dart';
 import 'package:assistant_app/api/models/server_capabilities.dart';
 import 'package:assistant_app/api/models/server_profile.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
+import 'package:assistant_app/api/models/surface_action.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
@@ -28,6 +29,7 @@ class _StreamingApiClient extends ApiClient {
     String conversationId,
     String message, {
     List<String>? attachmentIds,
+    SurfaceActionSubmission? surfaceAction,
   }) => controller.stream;
 }
 

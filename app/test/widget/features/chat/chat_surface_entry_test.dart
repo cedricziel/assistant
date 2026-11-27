@@ -1,7 +1,10 @@
 // RED→GREEN: openspec/changes/generative-ui-a2ui PR 15.4 — the timeline
-// adapter renders a surface entry through SurfaceFrame.
+// adapter renders a surface entry through SurfaceFrame. PR 17.4 adds the
+// pending marker and the action callback that reaches the host.
 
+import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/capabilities_provider.dart';
+import 'package:assistant_app/api/models/surface_action.dart';
 import 'package:assistant_app/features/chat/chat_timeline_entry.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_ui/assistant_ui.dart';
@@ -10,11 +13,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
-ChatMessage _entry({bool answerable = true}) {
+import '../../../features/chat/a2ui/a2ui_test_support.dart';
+
+ChatMessage _entry({
+  bool answerable = true,
+  MessageStatus status = MessageStatus.ok,
+  List<Map<String, Object?>> messages = const [],
+}) {
   return ChatMessage(
     id: 'surface-surface-1',
     role: 'assistant',
     content: '',
+    status: status,
     timelineType: TimelineEntryType.surface,
     surface: SurfaceRecord(
       surfaceId: 'surface-1',
@@ -24,14 +34,15 @@ ChatMessage _entry({bool answerable = true}) {
       fallbackText: 'Sunny, 21 °C',
       status: SurfaceStatus.active,
       answerable: answerable,
+      messages: messages,
     ),
   );
 }
 
-Widget _wrap(Widget child) {
+Widget _wrap(Widget child, {ApiClient? api}) {
   return ProviderScope(
     overrides: [
-      apiClientProvider.overrideWithValue(null),
+      apiClientProvider.overrideWithValue(api),
       uiLinkHostsProvider.overrideWithValue(const []),
     ],
     child: MaterialApp(
@@ -65,5 +76,42 @@ void main() {
 
     expect(find.text('Closed'), findsOneWidget);
     expect(find.text('Sunny, 21 °C'), findsOneWidget);
+  });
+
+  testWidgets('a pending surface shows progress', (tester) async {
+    await tester.pumpWidget(
+      _wrap(ChatTimelineEntry(message: _entry(status: MessageStatus.sending))),
+    );
+
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+  });
+
+  testWidgets('a Button action reaches the host with its context', (
+    tester,
+  ) async {
+    final api = ApiClient(baseUrl: 'http://fake', token: 'fake');
+    SurfaceRecord? fromSurface;
+    SurfaceActionSubmission? submitted;
+    await tester.pumpWidget(
+      _wrap(
+        ChatTimelineEntry(
+          message: _entry(messages: textAndButtonMessages()),
+          onSurfaceAction: (surface, action) {
+            fromSurface = surface;
+            submitted = action;
+          },
+        ),
+        api: api,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Go'));
+    await tester.pump();
+
+    expect(fromSurface?.surfaceId, 'surface-1');
+    expect(submitted?.surfaceId, 'surface-1');
+    expect(submitted?.name, 'submit');
+    expect(submitted?.context, {'who': 'me'});
   });
 }

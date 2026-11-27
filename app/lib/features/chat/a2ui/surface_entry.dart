@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../api/api_client.dart';
 import '../../../api/capabilities_provider.dart';
+import '../../../api/models/surface_action.dart';
 import '../../connection/connection_provider.dart';
 import 'a2ui_surface_view.dart';
 import 'assistant_catalog.dart';
@@ -25,10 +26,21 @@ class SurfaceEntry extends ConsumerStatefulWidget {
     super.key,
     required this.surface,
     this.entryState = EntryState.complete,
+    this.pending = false,
+    this.onAction,
   });
 
   final SurfaceRecord surface;
   final EntryState entryState;
+
+  /// The surface's action request is queued or in flight.
+  final bool pending;
+
+  /// Called with a Button action (and its data model when the surface sends
+  /// one). The host routes it to the interaction channel or the post-turn
+  /// route; the frame itself sends nothing.
+  final void Function(SurfaceRecord surface, SurfaceActionSubmission action)?
+  onAction;
 
   @override
   ConsumerState<SurfaceEntry> createState() => _SurfaceEntryState();
@@ -74,16 +86,31 @@ class _SurfaceEntryState extends ConsumerState<SurfaceEntry> {
       answerable: surface.answerable,
       fallbackText: surface.fallbackText,
       hasError: _failed,
+      pending: widget.pending,
       awaitingInput: widget.entryState == EntryState.awaitingInput,
       content: _catalog == null || surface.messages.isEmpty
           ? null
           : A2uiSurfaceView(
               messages: surface.messages,
               catalog: _catalog!,
+              onAction: widget.onAction == null ? null : _submit,
               onError: (_) {
                 if (mounted && !_failed) setState(() => _failed = true);
               },
             ),
+    );
+  }
+
+  void _submit(SurfaceAction action) {
+    widget.onAction?.call(
+      widget.surface,
+      SurfaceActionSubmission(
+        surfaceId: widget.surface.surfaceId,
+        name: action.action.name,
+        sourceComponentId: action.action.sourceComponentId,
+        context: Map<String, Object?>.from(action.action.context),
+        dataModel: action.dataModel,
+      ),
     );
   }
 }

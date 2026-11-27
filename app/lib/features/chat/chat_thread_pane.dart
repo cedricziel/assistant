@@ -4,6 +4,7 @@ import 'package:assistant_ui/assistant_ui.dart';
 
 import '../../api/models/interaction_answer.dart';
 import '../../api/models/server_capabilities.dart';
+import '../../api/models/surface_action.dart';
 import '../../shared/platform/widgets.dart';
 import 'chat_empty_starters.dart';
 import 'chat_message_wiring.dart';
@@ -39,6 +40,7 @@ class ChatThreadPane extends StatelessWidget {
     required this.onRemoveAttachment,
     required this.onShowQueuedMessage,
     required this.onInteractionAnswer,
+    required this.onSurfaceAction,
     required this.onRetry,
     required this.fetchMessageAudio,
     required this.feedbackState,
@@ -84,6 +86,10 @@ class ChatThreadPane extends StatelessWidget {
   final void Function(PendingMessage message, int index) onShowQueuedMessage;
   final void Function(String interactionId, InteractionAnswer answer)
   onInteractionAnswer;
+
+  /// Called when the user triggers an A2UI action on a surface.
+  final void Function(SurfaceRecord surface, SurfaceActionSubmission action)
+  onSurfaceAction;
   final void Function(ChatMessage message) onRetry;
   final Future<({Uint8List bytes, String mimeType})?> Function(ChatMessage)
   fetchMessageAudio;
@@ -156,6 +162,7 @@ class ChatThreadPane extends StatelessWidget {
         conversationId: chatState.conversationId,
         entryState: timelineEntryState(message),
         onInteractionAnswer: onInteractionAnswer,
+        onSurfaceAction: onSurfaceAction,
       );
     }
 

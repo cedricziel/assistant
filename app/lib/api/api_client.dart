@@ -22,6 +22,7 @@ import 'event_source_stream_stub.dart'
 import 'models/interaction_answer.dart';
 import 'models/server_capabilities.dart';
 import 'models/stream_event.dart';
+import 'models/surface_action.dart';
 import 'native_http_adapter_stub.dart'
     if (dart.library.io) 'native_http_adapter_io.dart'
     as native_http_adapter;
@@ -334,14 +335,23 @@ class ApiClient {
   /// [DoneEvent] when the server closes the stream. A rejected request yields
   /// a single [ErrorEvent] carrying the HTTP status (409 while an edit or
   /// regenerate holds the conversation).
+  ///
+  /// With [surfaceAction], this is the post-turn route for a surface the turn
+  /// that rendered it has left behind: the message is empty and the server
+  /// builds the visible user text. A 409 means the surface was already
+  /// submitted; a 410 means it is no longer answerable.
   Stream<StreamEvent> streamMessages(
     String conversationId,
     String message, {
     List<String>? attachmentIds,
+    SurfaceActionSubmission? surfaceAction,
   }) {
     final body = <String, dynamic>{'message': message};
     if (attachmentIds != null && attachmentIds.isNotEmpty) {
       body['attachment_ids'] = attachmentIds;
+    }
+    if (surfaceAction != null) {
+      body['surface_action'] = surfaceAction.toJson();
     }
     return _postSse('/api/conversations/$conversationId/messages', body);
   }

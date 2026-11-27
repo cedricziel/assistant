@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_client.dart';
 import '../../api/models/stream_event.dart';
+import '../../api/models/surface_action.dart';
 import '../connection/connection_provider.dart';
 import 'chat_announcer.dart';
 import 'chat_branch_switch.dart';
@@ -195,6 +196,16 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     final msgs = List<ChatMessage>.from(chatState.messages);
     reduce(msgs);
     state = AsyncData(chatState.copyWith(messages: msgs));
+  }
+
+  /// Show or clear the pending marker of the surface entry [surfaceId].
+  void _setSurfacePending(String surfaceId, bool pending) {
+    final current = state.value;
+    if (!ref.mounted || current == null) return;
+    _reduceMessages(
+      current,
+      (msgs) => markSurfacePending(msgs, surfaceId, pending: pending),
+    );
   }
 
   /// Apply [event] when it is a mid-turn event shared by the text, voice and
@@ -890,6 +901,38 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     }
   }
 
+  /// Surface actions waiting for the queue drain, in submit order.
+  final List<_QueuedSurfaceAction> _surfaceActions = [];
+
+  /// Submit [action] on [surface] after the turn that rendered it ended.
+  ///
+  /// Sent as a new message with an empty text and a `surface_action`, so it
+  /// queues behind a running turn like any other message. The surface shows
+  /// its pending state from now until the server's status `surface_update` (or
+  /// the request's outcome) settles it. In-turn waits go through the
+  /// interaction channel instead.
+  Future<void> submitSurfaceAction(
+    SurfaceRecord surface,
+    SurfaceActionSubmission action,
+  ) async {
+    final conversationId = state.value?.conversationId;
+    if (conversationId == null ||
+        surface.status != SurfaceStatus.active ||
+        !surface.answerable) {
+      return;
+    }
+    _surfaceActions.add(
+      _QueuedSurfaceAction(
+        conversationId: conversationId,
+        surfaceId: surface.surfaceId,
+        title: surface.title,
+        action: action,
+      ),
+    );
+    _setSurfacePending(surface.surfaceId, true);
+    if (!_session.draining) _drainQueue();
+  }
+
   /// Upload [audioBytes] to the voice endpoint and stream the response.
   ///
   /// Creates a conversation if none is active (same as [sendMessage]).
@@ -1230,19 +1273,23 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     try {
       while (ref.mounted) {
         final current = state.value ?? const ChatState();
-        if (current.pendingQueue.isEmpty) break;
+        if (current.pendingQueue.isNotEmpty) {
+          final pending = current.pendingQueue.first;
+          state = AsyncData(
+            current.copyWith(pendingQueue: current.pendingQueue.sublist(1)),
+          );
 
-        final pending = current.pendingQueue.first;
-        state = AsyncData(
-          current.copyWith(pendingQueue: current.pendingQueue.sublist(1)),
-        );
-
-        await _streamMessage(
-          pending.text,
-          pending.conversationId,
-          attachmentIds: pending.attachmentIds,
-          attachments: pending.attachments,
-        );
+          await _streamMessage(
+            pending.text,
+            pending.conversationId,
+            attachmentIds: pending.attachmentIds,
+            attachments: pending.attachments,
+          );
+        } else if (_surfaceActions.isNotEmpty) {
+          await _streamSurfaceAction(_surfaceActions.removeAt(0));
+        } else {
+          break;
+        }
       }
     } finally {
       _session.draining = false;
@@ -1378,6 +1425,68 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     }
   }
 
+  /// Send one queued post-turn surface action and stream its turn.
+  ///
+  /// The optimistic user bubble reads `Submitted “<title>”` with the "via
+  /// form" marker; the server replaces it with the same server-built text when
+  /// the conversation reloads. The surface stays pending until its status
+  /// `surface_update` arrives or the request is rejected.
+  Future<void> _streamSurfaceAction(_QueuedSurfaceAction queued) async {
+    final api = _api;
+    if (api == null) return;
+
+    _cancelFollowUps();
+    _session.beginTurn();
+    final current = state.value ?? const ChatState();
+    final tokenController = StreamController<String>.broadcast();
+    _session.openThinking();
+    final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
+    _session.conversationId = queued.conversationId;
+    _session.userMsgId = userMsgId;
+
+    final userMsg = ChatMessage(
+      id: userMsgId,
+      role: 'user',
+      content: 'Submitted “${queued.title}”',
+      status: MessageStatus.sending,
+      viaForm: true,
+    );
+    final assistantPlaceholder = ChatMessage(
+      id: streamingPlaceholderId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+      tokenStream: tokenController.stream,
+    );
+    final msgs = [...current.messages, userMsg, assistantPlaceholder];
+    closeActiveSurfaces(msgs, exceptSurfaceId: queued.surfaceId);
+    markSurfacePending(msgs, queued.surfaceId, pending: true);
+    state = AsyncData(
+      current.copyWith(
+        messages: msgs,
+        isSending: true,
+        streamingContent: '',
+        clearSuggestions: true,
+        clearError: true,
+      ),
+    );
+    _beginLifecycle();
+
+    await _streamTurn(
+      api: api,
+      conversationId: queued.conversationId,
+      userMsgId: userMsgId,
+      tokenController: tokenController,
+      source: api.streamMessages(
+        queued.conversationId,
+        '',
+        surfaceAction: queued.action,
+      ),
+      surfaceAction: (surfaceId: queued.surfaceId, userMsgId: userMsgId),
+    );
+    _setSurfacePending(queued.surfaceId, false);
+  }
+
   /// Stream a single [message] to the server and update state from SSE events.
   Future<void> _streamMessage(
     String message,
@@ -1454,6 +1563,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     required StreamController<String> tokenController,
     required Stream<StreamEvent> source,
     bool reloadOnTerminal = false,
+    ({String surfaceId, String userMsgId})? surfaceAction,
   }) async {
     final turn = _session.turnSeq;
     var currentUserId = userMsgId;
@@ -1532,6 +1642,10 @@ class ChatNotifier extends AsyncNotifier<ChatState>
               ? _TurnOutcome.cancelled
               : _TurnOutcome.failed;
         case ErrorEvent error:
+          if (surfaceAction != null) {
+            _failSurfaceActionTurn(chatState, error, surfaceAction);
+            return _TurnOutcome.failed;
+          }
           _failTurn(chatState, error, userMsgId: currentUserId);
           return error.isNotFound ? _TurnOutcome.notFound : _TurnOutcome.failed;
         default:
@@ -1577,6 +1691,29 @@ class ChatNotifier extends AsyncNotifier<ChatState>
             : null,
       ),
     );
+  }
+
+  /// Fail the turn of a post-turn surface action.
+  ///
+  /// The request never streamed a reply, so the optimistic submit bubble and
+  /// placeholder go. A 409 marks the surface submitted, a 410 closed, and any
+  /// other status leaves it answerable for another try.
+  void _failSurfaceActionTurn(
+    ChatState chatState,
+    ErrorEvent event,
+    ({String surfaceId, String userMsgId}) action,
+  ) {
+    _session.closeThinking();
+    state = AsyncData(
+      abortedSurfaceActionState(
+        chatState,
+        surfaceId: action.surfaceId,
+        userMsgId: action.userMsgId,
+        statusCode: event.statusCode,
+        error: event.message,
+      ),
+    );
+    _endLifecycle((at) => TurnFailed(message: event.message, at: at));
   }
 
   /// Adopt the server's user-row id for the optimistic bubble [from], so a
@@ -1907,6 +2044,23 @@ class ChatNotifier extends AsyncNotifier<ChatState>
       }
     }
   }
+}
+
+/// A post-turn surface action waiting for the queue drain.
+class _QueuedSurfaceAction {
+  const _QueuedSurfaceAction({
+    required this.conversationId,
+    required this.surfaceId,
+    required this.title,
+    required this.action,
+  });
+
+  final String conversationId;
+  final String surfaceId;
+
+  /// The surface title the optimistic submitted bubble reads.
+  final String title;
+  final SurfaceActionSubmission action;
 }
 
 /// How a branching turn ended, for [ChatNotifier.retryMessage]'s fallbacks.
