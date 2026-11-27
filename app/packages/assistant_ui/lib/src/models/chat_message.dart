@@ -161,6 +161,7 @@ class ChatMessage {
     this.replyBranch,
     this.model,
     this.surface,
+    this.viaForm = false,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -266,6 +267,10 @@ class ChatMessage {
   /// The surface a [TimelineEntryType.surface] entry renders.
   final SurfaceRecord? surface;
 
+  /// This user message was built by the server for a surface action, not
+  /// typed by the user. The bubble says so.
+  final bool viaForm;
+
   /// The caller's feedback on this message, `null` when none.
   ///
   /// Mutable like [content]: the chat notifier applies optimistic changes in
@@ -297,6 +302,7 @@ class ChatMessage {
     MessageFeedback? feedback,
     bool clearFeedback = false,
     SurfaceRecord? surface,
+    bool? viaForm,
   }) {
     return ChatMessage(
         id: id ?? this.id,
@@ -324,6 +330,7 @@ class ChatMessage {
         replyBranch: replyBranch,
         model: model,
         surface: surface ?? this.surface,
+        viaForm: viaForm ?? this.viaForm,
       )
       ..interaction = interaction
       ..feedback = clearFeedback ? null : (feedback ?? this.feedback);

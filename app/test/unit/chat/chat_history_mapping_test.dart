@@ -73,6 +73,51 @@ MessageSummary _msg({
   );
 }
 
+SurfaceSummary _surface({
+  String id = 's1',
+  String? toolCallId,
+  required String anchorMessageId,
+  int anchorCallIndex = 0,
+  String title = 'Trip',
+  String fallbackText = 'Pick a date',
+  String status = 'active',
+  bool answerable = true,
+  int turn = 1,
+  Map<String, Object?> dataModel = const {'date': ''},
+  Map<String, Object?>? submittedAction,
+  String? actionMessageId,
+}) {
+  return SurfaceSummary(
+    (b) => b
+      ..surfaceId = id
+      ..toolCallId = toolCallId
+      ..anchorMessageId = anchorMessageId
+      ..anchorCallIndex = anchorCallIndex
+      ..title = title
+      ..fallbackText = fallbackText
+      ..status = status
+      ..answerable = answerable
+      ..turn = turn
+      ..createdAt = DateTime.parse('2026-05-16T00:00:00Z')
+      ..actionMessageId = actionMessageId
+      ..submittedAction = submittedAction == null
+          ? null
+          : JsonObject(submittedAction)
+      ..messages = ListBuilder<JsonObject>([
+        JsonObject({
+          'version': '1.0',
+          'createSurface': {
+            'surfaceId': id,
+            'components': [
+              {'id': 'root', 'component': 'Column'},
+            ],
+            'dataModel': dataModel,
+          },
+        }),
+      ]),
+  );
+}
+
 InteractionDetail _interaction({
   required String id,
   String kind = 'tool_approval',
@@ -893,5 +938,270 @@ void main() {
 
       expect(messages.single.feedback, isNull);
     });
+  });
+
+  group('chatMessagesFromHistory — surfaces', () {
+    test(
+      'a surface replaces the render-surface chip with its tool call id',
+      () {
+        final history = [
+          _msg(id: 'u1', role: 'user', content: 'plan a trip'),
+          _msg(
+            id: 'a1',
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              (
+                name: 'render-surface',
+                status: 'ok',
+                result: 'surface s1',
+                id: 'call-1',
+              ),
+            ],
+          ),
+        ];
+
+        final mapped = chatMessagesFromHistory(
+          history,
+          surfaces: [_surface(anchorMessageId: 'a1', toolCallId: 'call-1')],
+        );
+
+        expect(
+          mapped.where((m) => m.timelineType == TimelineEntryType.toolCall),
+          isEmpty,
+          reason: 'a successful render-surface call renders as its surface',
+        );
+        final entry = mapped.last;
+        expect(entry.timelineType, TimelineEntryType.surface);
+        expect(entry.surface?.surfaceId, 's1');
+      },
+    );
+
+    test(
+      'without tool call ids a surface is placed by anchor message and index',
+      () {
+        final history = [
+          _msg(
+            id: 'a1',
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              (name: 'bash', status: 'ok', result: 'ok', id: null),
+              (name: 'render-surface', status: 'ok', result: 'ok', id: null),
+            ],
+          ),
+        ];
+
+        final mapped = chatMessagesFromHistory(
+          history,
+          surfaces: [_surface(anchorMessageId: 'a1', anchorCallIndex: 1)],
+        );
+
+        expect(mapped.first.timelineType, TimelineEntryType.toolCall);
+        expect(mapped.first.toolCalls.single.toolName, 'bash');
+        expect(mapped.last.timelineType, TimelineEntryType.surface);
+        expect(mapped.last.surface?.surfaceId, 's1');
+      },
+    );
+
+    test('a surface is not matched by turn order', () {
+      final history = [
+        _msg(id: 'u1', role: 'user', content: 'hi', turn: 0),
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          turn: 1,
+          toolCalls: [
+            (name: 'render-surface', status: 'ok', result: 'ok', id: 'call-1'),
+          ],
+        ),
+      ];
+
+      final mapped = chatMessagesFromHistory(
+        history,
+        // The surface's turn deliberately differs from its anchor's.
+        surfaces: [
+          _surface(anchorMessageId: 'a1', toolCallId: 'call-1', turn: 99),
+        ],
+      );
+
+      expect(mapped.last.timelineType, TimelineEntryType.surface);
+    });
+
+    test('a failed call before a retry stays an error chip', () {
+      final history = [
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            (
+              name: 'render-surface',
+              status: 'error',
+              result: 'bad schema',
+              id: 'bad',
+            ),
+            (name: 'render-surface', status: 'ok', result: 'ok', id: 'good'),
+          ],
+        ),
+      ];
+
+      final mapped = chatMessagesFromHistory(
+        history,
+        surfaces: [_surface(anchorMessageId: 'a1', toolCallId: 'good')],
+      );
+
+      expect(mapped, hasLength(2));
+      expect(mapped.first.timelineType, TimelineEntryType.toolCall);
+      expect(mapped.first.toolCalls.single.status, ToolCallStatus.error);
+      expect(mapped.first.toolCalls.single.result, 'bad schema');
+      expect(mapped.last.timelineType, TimelineEntryType.surface);
+    });
+
+    test('a successful call without a stored surface leaves no chip', () {
+      final history = [
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            (name: 'render-surface', status: 'ok', result: 'ok', id: null),
+            (name: 'render-surface', status: 'error', result: 'bad', id: null),
+          ],
+        ),
+      ];
+
+      final mapped = chatMessagesFromHistory(history);
+
+      expect(mapped, hasLength(1));
+      expect(mapped.single.timelineType, TimelineEntryType.toolCall);
+      expect(mapped.single.toolCalls.single.status, ToolCallStatus.error);
+    });
+
+    test('a submitted surface shows the submitted values', () {
+      final history = [
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: '',
+          toolCalls: [
+            (name: 'render-surface', status: 'ok', result: 'ok', id: 'call-1'),
+          ],
+        ),
+      ];
+
+      final mapped = chatMessagesFromHistory(
+        history,
+        surfaces: [
+          _surface(
+            anchorMessageId: 'a1',
+            toolCallId: 'call-1',
+            status: 'submitted',
+            answerable: false,
+            dataModel: const {'date': ''},
+            submittedAction: const {
+              'name': 'submit',
+              'source_component_id': 'go',
+              'context': <String, Object?>{},
+              'data_model': {'date': '2026-12-24'},
+            },
+          ),
+        ],
+      );
+
+      final surface = mapped.single.surface!;
+      expect(surface.status, SurfaceStatus.submitted);
+      final create = surface.messages.single['createSurface'] as Map;
+      expect(create['dataModel'], {'date': '2026-12-24'});
+    });
+
+    test(
+      'the server answerable flag decides whether an active surface is closed',
+      () {
+        final history = [
+          _msg(
+            id: 'a1',
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              (
+                name: 'render-surface',
+                status: 'ok',
+                result: 'ok',
+                id: 'call-1',
+              ),
+            ],
+          ),
+        ];
+
+        final open = chatMessagesFromHistory(
+          history,
+          surfaces: [_surface(anchorMessageId: 'a1', toolCallId: 'call-1')],
+        ).single.surface!;
+        final closed = chatMessagesFromHistory(
+          history,
+          surfaces: [
+            _surface(
+              anchorMessageId: 'a1',
+              toolCallId: 'call-1',
+              answerable: false,
+            ),
+          ],
+        ).single.surface!;
+
+        expect(open.answerable, isTrue);
+        expect(open.isClosed, isFalse);
+        expect(closed.answerable, isFalse);
+        expect(closed.isClosed, isTrue);
+      },
+    );
+
+    test(
+      'the action message carries the form marker and keeps its server text',
+      () {
+        final history = [
+          _msg(id: 'u1', role: 'user', content: 'plan a trip', turn: 0),
+          _msg(
+            id: 'a1',
+            role: 'assistant',
+            content: '',
+            turn: 1,
+            toolCalls: [
+              (
+                name: 'render-surface',
+                status: 'ok',
+                result: 'ok',
+                id: 'call-1',
+              ),
+            ],
+          ),
+          _msg(id: 'u2', role: 'user', content: 'Submitted “Trip”', turn: 2),
+        ];
+
+        final mapped = chatMessagesFromHistory(
+          history,
+          surfaces: [
+            _surface(
+              anchorMessageId: 'a1',
+              toolCallId: 'call-1',
+              status: 'submitted',
+              answerable: false,
+              actionMessageId: 'u2',
+              submittedAction: const {
+                'name': 'submit',
+                'source_component_id': 'go',
+                'context': <String, Object?>{},
+              },
+            ),
+          ],
+        );
+
+        final action = mapped.firstWhere((m) => m.id == 'u2');
+        expect(action.viaForm, isTrue);
+        expect(action.content, 'Submitted “Trip”');
+        expect(mapped.firstWhere((m) => m.id == 'u1').viaForm, isFalse);
+      },
+    );
   });
 }
