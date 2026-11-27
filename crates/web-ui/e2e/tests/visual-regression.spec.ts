@@ -1,4 +1,4 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page, Route } from "@playwright/test";
 
 import { enableAccessibility } from "./support/flutter";
 import { mockEverything } from "./support/integration-mocks";
@@ -164,14 +164,104 @@ const CATALOG_FIXTURE = [
   },
 ];
 
+const SETTINGS_ME = "user-1";
+
 /**
- * Stub `GET /api/tool-permission-rules` so the settings screenshot shows saved
- * tool approvals without depending on rules stored in the test server.
+ * Mock a space admin opening the settings screen: identity, org, spaces,
+ * membership, the org's users (for owner labels) and the two rule scopes.
+ *
+ * The `scope=space` response adds two members' rules, so the screenshot shows
+ * the "Members' approvals" group with a known member name and a bare user id.
  */
-async function mockToolPermissionRules(page: Page, rules: unknown[]) {
-  await page.route(/\/api\/tool-permission-rules(\?.*)?$/, (route) =>
-    route.fulfill({ json: rules }),
+async function mockSettingsAdmin(page: Page) {
+  const selection = {
+    orgId: "org-1",
+    orgName: "Acme",
+    spaceId: "eng",
+    spaceName: "Engineering",
+  };
+  // The persistent context runs login before this test body, so seed the
+  // selection now; the next full navigation reloads the app with it.
+  await page.evaluate(
+    (value) =>
+      window.localStorage.setItem(
+        "assistant.spaceSelection",
+        JSON.stringify(value),
+      ),
+    selection,
   );
+  await page.addInitScript((value) => {
+    window.localStorage.setItem(
+      "assistant.spaceSelection",
+      JSON.stringify(value),
+    );
+  }, selection);
+
+  const json = (route: Route, body: unknown) => route.fulfill({ json: body });
+
+  await page.route(/\/api\/users\/me$/, (route) =>
+    json(route, {
+      id: SETTINGS_ME,
+      email: "ada@example.com",
+      name: "Ada",
+      org_id: "org-1",
+      created_at: "2026-01-01T09:00:00Z",
+      updated_at: "2026-01-01T09:00:00Z",
+    }),
+  );
+  await page.route(/\/api\/orgs$/, (route) =>
+    json(route, [
+      { id: "org-1", name: "Acme", slug: "acme", auth_mode: "password" },
+    ]),
+  );
+  await page.route(/\/api\/orgs\/org-1$/, (route) =>
+    json(route, {
+      id: "org-1",
+      name: "Acme",
+      slug: "acme",
+      auth_mode: "password",
+      created_at: "2026-01-01T09:00:00Z",
+      updated_at: "2026-01-01T09:00:00Z",
+    }),
+  );
+  await page.route(/\/api\/orgs\/org-1\/spaces$/, (route) =>
+    json(route, [{ id: "eng", name: "Engineering", slug: "eng" }]),
+  );
+  await page.route(/\/api\/orgs\/org-1\/spaces\/eng\/members$/, (route) =>
+    json(route, [
+      {
+        space_id: "eng",
+        user_id: SETTINGS_ME,
+        role: "space_admin",
+        created_at: "2026-01-01T09:00:00Z",
+      },
+    ]),
+  );
+  await page.route(/\/api\/orgs\/org-1\/users$/, (route) =>
+    json(route, [
+      {
+        id: SETTINGS_ME,
+        email: "ada@example.com",
+        name: "Ada",
+        created_at: "2026-01-01T09:00:00Z",
+      },
+      {
+        id: "user-2",
+        email: "grace@example.com",
+        name: "Grace",
+        created_at: "2026-01-01T09:00:00Z",
+      },
+    ]),
+  );
+  await page.route(/\/api\/tool-permission-rules(\?.*)?$/, (route) => {
+    const scope = new URL(route.request().url()).searchParams.get("scope");
+    return json(
+      route,
+      scope === "space"
+        ? TOOL_PERMISSION_RULES_SPACE_FIXTURE
+        : TOOL_PERMISSION_RULES_FIXTURE,
+    );
+  });
 }
 
 const TOOL_PERMISSION_RULES_FIXTURE = [
@@ -198,6 +288,27 @@ const TOOL_PERMISSION_RULES_FIXTURE = [
     rule: "bash(rm *)",
     tool_name: "bash",
     created_at: "2026-01-04T09:00:00Z",
+  },
+];
+
+/** The same rules plus two members', as returned for `scope=space`. */
+const TOOL_PERMISSION_RULES_SPACE_FIXTURE = [
+  ...TOOL_PERMISSION_RULES_FIXTURE,
+  {
+    id: "rule-4",
+    user_id: "user-2",
+    effect: "allow",
+    rule: "bash(npm test*)",
+    tool_name: "bash",
+    created_at: "2026-01-05T09:00:00Z",
+  },
+  {
+    id: "rule-5",
+    user_id: "user-3",
+    effect: "deny",
+    rule: "web-fetch(https://*.example.com/*)",
+    tool_name: "web-fetch",
+    created_at: "2026-01-06T09:00:00Z",
   },
 ];
 
@@ -687,11 +798,31 @@ test.describe("Authenticated pages", () => {
   });
 
   test("settings screen", async ({ page }) => {
-    await mockToolPermissionRules(page, TOOL_PERMISSION_RULES_FIXTURE);
+    await mockSettingsAdmin(page);
     await navigateAndSettle(page, "/settings");
     // The section reloads once the space selection resolves, so a second
     // request reaches the mock. Wait for that as well before the screenshot.
     await page.waitForTimeout(1_500);
+    // The settings list scrolls inside the Flutter canvas, so bring the tool
+    // approvals (and the admin-only members group) into view. Desktop and
+    // tablet take wheel events; touch emulation ignores them, so also drive a
+    // synthesized touch scroll through CDP.
+    const viewport = page.viewportSize() ?? { width: 1280, height: 900 };
+    const scrollX = Math.round(viewport.width * 0.75);
+    const scrollY = Math.round(viewport.height * 0.6);
+    await page.mouse.move(scrollX, scrollY);
+    await page.mouse.wheel(0, 2_000);
+    await page.waitForTimeout(500);
+    const cdp = await page.context().newCDPSession(page);
+    for (let i = 0; i < 2; i++) {
+      await cdp.send("Input.synthesizeScrollGesture", {
+        x: scrollX,
+        y: scrollY,
+        yDistance: -2000,
+        speed: 2000,
+      });
+      await page.waitForTimeout(700);
+    }
     await expect(page).toHaveScreenshot("settings.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
