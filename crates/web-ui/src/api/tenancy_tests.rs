@@ -884,6 +884,38 @@ async fn push_subscriptions_never_cross_spaces() {
     );
 }
 
+#[tokio::test]
+async fn subscribing_stores_the_callers_user_id() {
+    let t = Tenancy::build().await;
+    for (who, endpoint) in [
+        (Who::Alice, "https://push.test/alice"),
+        (Who::Amy, "https://push.test/amy"),
+    ] {
+        let resp = t
+            .send(
+                who,
+                Method::POST,
+                "/push/subscribe",
+                Some(A1),
+                Some(json!({"endpoint": endpoint, "p256dh": "k", "auth": "a"})),
+            )
+            .await;
+        assert_eq!(resp.status, StatusCode::CREATED, "{endpoint}");
+    }
+
+    let store = t.a1.push_subscription_store();
+    let alice = store.list_for_user("alice").await.unwrap();
+    assert_eq!(
+        alice
+            .iter()
+            .map(|s| s.endpoint.as_str())
+            .collect::<Vec<_>>(),
+        ["https://push.test/alice"],
+        "the subscription carries the id of the user who subscribed"
+    );
+    assert_eq!(store.list_for_user("amy").await.unwrap().len(), 1);
+}
+
 // -- Webhooks ------------------------------------------------------------------
 
 #[tokio::test]

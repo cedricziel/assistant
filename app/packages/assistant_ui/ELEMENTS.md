@@ -48,21 +48,21 @@ The list keeps the old numbering. Three prerequisites are now owned by siblings.
 
 ## Tool use (4)
 
-| #   | Element        | Verdict                             | Flutter element                            | Note                                                                                                                                                                                                                                                                     |
-| --- | -------------- | ----------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 11  | Tool call      | Adopt (have)                        | `ToolCallBody`, `GenericToolResultView`    | `ToolCallBody(record, entryState, footer)`; details come from `ToolResultRendererScope`, else `GenericToolResultView`. The app passes its MCP App frame as `footer`. PR 6.                                                                                               |
-| 12  | Tool timeline  | Adopt (have)                        | `TimelineEntryShell`, `TimelineEntryView`  | `TimelineEntryShell` (PR 5b): header, collapsible `body`, `footer` below it, `EntryState.awaitingInput`. `TimelineEntryView`: PR 7c.                                                                                                                                     |
-| 13  | Terminal block | **Adopt via tool-result-renderers** | `TerminalResultView` (sibling)             | `terminal` contract over `bash` `.data`, resolved through `ToolResultRendererScope`.                                                                                                                                                                                     |
+| #   | Element        | Verdict      | Flutter element                           | Note                                                                                                 |
+| --- | -------------- | ------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 11  | Tool call      | Adopt (have) | `ToolCallBody`, `GenericToolResultView`   | `ToolCallBody(record, entryState, footer)`; details come from `ToolResultRendererScope`, else `GenericToolResultView`. The app passes its MCP App frame as `footer`. PR 6. |
+| 12  | Tool timeline  | Adopt (have) | `TimelineEntryShell`, `TimelineEntryView` | `TimelineEntryShell` (PR 5b): header, collapsible `body`, `footer` below it, `EntryState.awaitingInput`. `TimelineEntryView`: PR 7c. |
+| 13  | Terminal block | Adopt (have) | `TerminalResultView`                      | `terminal` contract over `bash` `.data`, resolved through `ToolResultRendererScope`. C4. |
 | 14  | Code diff      | Adopt (have)                        | `CodeDiffResultView`, `CodeFileResultView` | `code_diff` and `code_file` contracts over `file-edit` / `file-write` / `file-read` `.data`, resolved through `ToolResultRendererScope`. `CodeFileResultView` renders through `CodeBlock`; `CodeDiffResultView` marks lines with a `+`/`−` gutter as well as a tint. C7. |
 
 ## Knowledge (4)
 
-| #   | Element          | Verdict                             | Flutter element                              | Note                                                                                                                                                  |
-| --- | ---------------- | ----------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 15  | Web search       | **Adopt via tool-result-renderers** | `SourcesResultView` (sibling)                | `sources` contract over `web-search` `.data`.                                                                                                         |
-| 16  | Sources          | Adopt (have)                        | `SourcesResultView`, `LinkPreviewResultView` | `sources` and `link_preview` contracts over `web-search` and `web-fetch` `.data`; `LinkPreviewResultView` lands with C5, `SourcesResultView` with C4. |
-| 17  | Inline citation  | **Defer: P1 + citation markers**    | —                                            | Also needs the model to emit citation markers in message text. A candidate for `MessageBubble.extensions` later.                                      |
-| 18  | Image generation | Adopt (have)                        | `MessageBubble.attachments` slot             | The app supplies `MessageAttachments` (I/O: `http`, `cached_network_image`, share). PR 8b.                                                            |
+| #   | Element          | Verdict      | Flutter element                              | Note                                                                                     |
+| --- | ---------------- | ------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 15  | Web search       | Adopt (have) | `SourcesResultView`                          | `sources` contract over `web-search` `.data`. C4.                                        |
+| 16  | Sources          | Adopt (have) | `SourcesResultView`, `LinkPreviewResultView` | `sources` and `link_preview` contracts over `web-search` and `web-fetch` `.data`. C4, C5. |
+| 17  | Inline citation  | **Defer: P1 + citation markers** | —                        | Also needs the model to emit citation markers in message text. A candidate for `MessageBubble.extensions` later. |
+| 18  | Image generation | Adopt (have) | `MessageBubble.attachments` slot             | The app supplies `MessageAttachments` (I/O: `http`, `cached_network_image`, share). PR 8b. |
 
 ## Structured output (2)
 
@@ -124,9 +124,9 @@ Stay card · table reservation · order tracking · flight tracker · portfolio 
 
 | Verdict                                       | Count  |
 | --------------------------------------------- | ------ |
-| Adopt (have), packaged by this change         | 22     |
+| Adopt (have), packaged by this change         | 24     |
 | Adopt (scoped)                                | 2      |
-| Adopt via sibling change, individual elements | 7      |
+| Adopt via sibling change, individual elements | 5      |
 | Adopt via generative-ui-a2ui, category        | 22     |
 | Defer                                         | 2      |
 | Decline                                       | 4      |

@@ -6,6 +6,11 @@ import '../../api/models/stream_event.dart';
 /// resume so it can be recovered.
 typedef DisconnectedTurn = ({String conversationId, String userMsgId});
 
+/// The edit a branch turn re-submitted: the original message and the new text.
+/// Kept after the turn ends, so Retry can re-issue the edit when regenerating
+/// the edited message returns 404.
+typedef EditSource = ({String messageId, String text});
+
 /// Mutable bookkeeping for the chat turn currently streaming (or last
 /// streamed) by `ChatNotifier`: stop and detach, the replay cursor, deferred
 /// reconnection and the thinking token stream.
@@ -45,6 +50,14 @@ class ChatStreamSession {
   /// detach can reconcile it without the stream loop.
   String? userMsgId;
   String? conversationId;
+
+  /// The server id of the user row the turn persists, once `run_started`
+  /// reported it. Retry regenerates that message instead of re-sending its
+  /// text.
+  String? serverUserId;
+
+  /// The edit the in-flight (or last) branch turn submitted.
+  EditSource? editSource;
 
   /// Set once the server's terminal `agent_error` frame was reconciled, so a
   /// failed replay attempt does not replay a finished turn again.
@@ -132,10 +145,56 @@ class ChatStreamSession {
     terminalFrameSeen = false;
     userMsgId = null;
     conversationId = null;
+    serverUserId = null;
+    editSource = null;
     stopRequested = false;
     runId = null;
     lastSeq = 0;
     clearDisconnected();
+  }
+
+  /// Whether [turn] is still the newest turn. A branch operation that takes
+  /// over bumps [turnSeq], so the superseded stream stops without reconciling
+  /// into the timeline the operation replaced.
+  bool isCurrentTurn(int turn) => turnSeq == turn;
+
+  /// End the current turn locally for a branch operation that replaces the
+  /// timeline: late frames of its stream are dropped by [isCurrentTurn].
+  void supersede() {
+    turnSeq++;
+    terminalFrameSeen = false;
+    cancelStopTimer();
+    stopRequested = false;
+    userMsgId = null;
+    conversationId = null;
+    serverUserId = null;
+    editSource = null;
+    runId = null;
+    lastSeq = 0;
+    clearDisconnected();
+  }
+
+  /// Read one turn's SSE [source], handing every non-terminal frame to
+  /// [onEvent] and returning the frame that ended the turn.
+  ///
+  /// Returns `null` when the stream ended without a terminal frame, or when
+  /// [turn] was superseded by a newer one: the caller must then leave the
+  /// timeline alone.
+  Future<StreamEvent?> consume(
+    Stream<StreamEvent> source, {
+    required int turn,
+    required void Function(StreamEvent event) onEvent,
+  }) async {
+    await for (final event in source) {
+      if (!isCurrentTurn(turn)) return null;
+      if (event is DoneEvent ||
+          event is AgentErrorEvent ||
+          event is ErrorEvent) {
+        return event;
+      }
+      onEvent(event);
+    }
+    return null;
   }
 
   /// Advance the replay cursor to one past [event].

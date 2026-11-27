@@ -163,28 +163,39 @@ class NotificationService {
     }
   }
 
-  /// Unsubscribe from Web Push (called when user disables notifications or
-  /// on dispose).
+  /// Endpoint used by [unsubscribeFromWebPush] instead of asking the browser.
+  ///
+  /// Tests run on the VM, where the web implementation has no browser; this
+  /// lets them exercise the server DELETE and its ordering at logout.
+  @visibleForTesting
+  String? debugPushEndpoint;
+
+  /// Unsubscribe this browser from Web Push (called on logout).
+  ///
+  /// Deletes the server row first, while the session is still valid, then
+  /// drops the browser's PushManager subscription so a later login on the same
+  /// browser does not inherit the previous user's endpoint.
   Future<void> unsubscribeFromWebPush() async {
-    if (!kIsWeb) return;
-    final endpoint = await web_impl.getCurrentPushEndpoint();
-    if (endpoint == null) return;
-
+    final endpoint =
+        debugPushEndpoint ?? await web_impl.getCurrentPushEndpoint();
     final profile = _ref.read(activeProfileProvider);
-    if (profile == null) return;
 
-    try {
-      await http.delete(
-        Uri.parse('${profile.baseUrl}/api/push/subscribe'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${profile.token}',
-        },
-        body: jsonEncode({'endpoint': endpoint}),
-      );
-    } catch (e) {
-      debugPrint('[NotificationService] unsubscribeFromWebPush failed: $e');
+    if (endpoint != null && profile != null) {
+      try {
+        await http.delete(
+          Uri.parse('${profile.baseUrl}/api/push/subscribe'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ${profile.token}',
+          },
+          body: jsonEncode({'endpoint': endpoint}),
+        );
+      } catch (e) {
+        debugPrint('[NotificationService] unsubscribeFromWebPush failed: $e');
+      }
     }
+
+    await web_impl.unsubscribeFromWebPush();
   }
 
   // -- Internal ---------------------------------------------------------------

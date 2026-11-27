@@ -23,21 +23,30 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   const ChatMessageBubbleAdapter({
     super.key,
     required this.message,
+    required this.senderLabel,
     required this.capabilities,
     required this.fetchMessageAudio,
     this.isGrouped = false,
     this.onRetry,
     this.onStop,
     this.isStopping = false,
+    this.showResponseTiming = false,
     this.imageBaseUrl,
     this.imageAuthToken,
   });
 
   final ChatMessage message;
+
+  /// Who the bubble speaks for: "You" for the user's own messages and the
+  /// active Persona's name for assistant messages.
+  final String senderLabel;
   final bool isGrouped;
   final VoidCallback? onRetry;
   final VoidCallback? onStop;
   final bool isStopping;
+
+  /// Whether finished replies show their response timing.
+  final bool showResponseTiming;
   final ServerCapabilities capabilities;
   final Future<({Uint8List bytes, String mimeType})?> Function()
   fetchMessageAudio;
@@ -48,6 +57,7 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   Widget build(BuildContext context) {
     return MessageBubble(
       message: message,
+      senderLabel: senderLabel,
       isGrouped: isGrouped,
       attachments: message.attachments.isEmpty
           ? null
@@ -65,6 +75,7 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
         onRetry: onRetry,
         onStop: onStop,
         isStopping: isStopping,
+        showResponseTiming: showResponseTiming,
       ),
       contextMenuBuilder: _textSelectionContextMenuBuilder,
     );

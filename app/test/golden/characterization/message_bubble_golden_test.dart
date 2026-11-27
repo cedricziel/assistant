@@ -31,6 +31,7 @@ Widget _bubble(
   padding: const EdgeInsets.symmetric(horizontal: 12),
   child: ChatMessageBubbleAdapter(
     message: message,
+    senderLabel: message.isUser ? 'You' : 'Ada',
     capabilities: capabilities,
     fetchMessageAudio: _noAudio,
     isGrouped: isGrouped,

@@ -42,10 +42,12 @@ const List<String> kAssistantUiElements = [
   'QueuedMessageBubble',
   'RegenerateMenuButton',
   'SlashCommandMenu',
+  'SourcesResultView',
   'StarterPrompts',
   'SubagentBody',
   'SuggestionChips',
   'SurfaceFrame',
+  'TerminalResultView',
   'ThinkingBody',
   'ThreadDensityScope',
   'ThreadEmptyState',
@@ -64,8 +66,6 @@ const List<String> kAssistantUiElements = [
   // 'FeedbackCommentField', // slot: message-feedback 5
   // 'MessageEditor', // slot: message-branching 9
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
-  // 'SourcesResultView', // slot: tool-result-renderers C4
-  // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'UnknownInteractionCard', // slot: tool-approval-prompts 13b
 ];

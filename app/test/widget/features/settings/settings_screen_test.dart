@@ -1,6 +1,10 @@
+import 'package:assistant_api/assistant_api.dart'
+    show ToolPermissionRuleSummary;
 import 'package:assistant_app/features/notifications/notification_service.dart';
 import 'package:assistant_app/features/settings/response_timing_preference.dart';
 import 'package:assistant_app/features/settings/settings_screen.dart';
+import 'package:assistant_app/features/settings/tool_approvals_section.dart';
+import 'package:assistant_app/features/settings/tool_permission_rules_provider.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +23,7 @@ void main() {
         notificationServiceProvider.overrideWith(
           (ref) => _FakeNotificationService(ref: ref),
         ),
+        toolPermissionRulesProvider.overrideWith(_NoRulesNotifier.new),
       ],
       child: const MaterialApp(home: SettingsScreen()),
     );
@@ -72,6 +77,22 @@ void main() {
       // Re-read the persisted value.
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('notifications.chat_messages'), isFalse);
+    });
+  });
+
+  group('SettingsScreen – Tool approvals', () {
+    testWidgets('shows the Tool approvals section', (tester) async {
+      await tester.pumpWidget(buildUnderTest());
+      await tester.pump();
+
+      await tester.scrollUntilVisible(
+        find.byType(ToolApprovalsSection),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+
+      expect(find.byType(ToolApprovalsSection), findsOneWidget);
+      expect(find.text('Tool approvals'), findsOneWidget);
     });
   });
 
@@ -167,6 +188,11 @@ void main() {
       });
     }
   });
+}
+
+class _NoRulesNotifier extends ToolPermissionRulesNotifier {
+  @override
+  Future<List<ToolPermissionRuleSummary>> build() async => const [];
 }
 
 // ---------------------------------------------------------------------------

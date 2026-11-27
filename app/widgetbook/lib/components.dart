@@ -34,10 +34,12 @@ import 'components/question_card.dart';
 import 'components/queued_message_bubble.dart';
 import 'components/regenerate_menu_button.dart';
 import 'components/slash_command_menu.dart';
+import 'components/sources_result_view.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/surface_frame.dart';
 import 'components/subagent_body.dart';
+import 'components/terminal_result_view.dart';
 import 'components/thinking_body.dart';
 import 'components/thread_density_scope.dart';
 import 'components/thread_empty_state.dart';
@@ -64,10 +66,8 @@ final List<WidgetbookComponent> kComponents = [
   // feedbackButtonsComponent, // slot: message-feedback 5
   // feedbackCommentFieldComponent, // slot: message-feedback 5
   // messageEditorComponent, // slot: message-branching 9
-  // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
-  // sourcesResultViewComponent, // slot: tool-result-renderers C4
-  // terminalResultViewComponent, // slot: tool-result-renderers C4
-  // timelineEntryShellComponent, // slot: chat-element-library 5b
+  // 'permissionRuleTileComponent', // slot: tool-approval-prompts 14b
+  // 'timelineEntryShellComponent', // slot: chat-element-library 5b
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   attachmentTrayComponent,
@@ -103,10 +103,12 @@ final List<WidgetbookComponent> kComponents = [
   queuedMessageBubbleComponent,
   regenerateMenuButtonComponent,
   slashCommandMenuComponent,
+  sourcesResultViewComponent,
   starterPromptsComponent,
   subagentBodyComponent,
   suggestionChipsComponent,
   surfaceFrameComponent,
+  terminalResultViewComponent,
   thinkingBodyComponent,
   threadDensityScopeComponent,
   threadEmptyStateComponent,

@@ -178,6 +178,7 @@ import 'package:assistant_api/src/model/stream_run_events_query.dart';
 import 'package:assistant_api/src/model/string_list.dart';
 import 'package:assistant_api/src/model/subscribe_request.dart';
 import 'package:assistant_api/src/model/subscription_response.dart';
+import 'package:assistant_api/src/model/surface_action_request.dart';
 import 'package:assistant_api/src/model/surface_summary.dart';
 import 'package:assistant_api/src/model/switch_branch_request.dart';
 import 'package:assistant_api/src/model/task.dart';
@@ -392,6 +393,7 @@ part 'serializers.g.dart';
   StringList,
   SubscribeRequest,
   SubscriptionResponse,
+  SurfaceActionRequest,
   SurfaceSummary,
   SwitchBranchRequest,
   Task,

@@ -9,6 +9,8 @@ import 'compact_expandable.dart';
 import 'data_table_result_view.dart';
 import 'link_preview_result_view.dart';
 import 'plan_result_view.dart';
+import 'sources_result_view.dart';
+import 'terminal_result_view.dart';
 import 'tool_result_renderer.dart';
 
 /// The renderers the app installs by default, one per structured result kind.
@@ -18,6 +20,8 @@ List<ToolResultRenderer<Object>> defaultToolResultRenderers() => const [
   DataTableResultRenderer(),
   LinkPreviewRenderer(),
   PlanResultRenderer(),
+  SourcesRenderer(),
+  TerminalRenderer(),
 ];
 
 /// Resolves a tool-call record to the widget that shows its result, or `null`

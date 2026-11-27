@@ -30,6 +30,9 @@ class OAuthService {
           ),
       basePathOverride: serverUrl,
     );
+    // The generated client ignores `basePathOverride` when a Dio is supplied,
+    // so apply the server URL to the injected client explicitly.
+    _api.dio.options.baseUrl = serverUrl;
     _oauthApi = _api.getOauthApi();
   }
 
