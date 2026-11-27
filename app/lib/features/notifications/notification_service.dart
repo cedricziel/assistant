@@ -163,6 +163,16 @@ class NotificationService {
     }
   }
 
+  /// Whether this browser already holds a Web Push subscription.
+  ///
+  /// The owner-targeted push covers approval requests on web, so
+  /// [AgentEventListener] skips a duplicate local notification when this is
+  /// true. Always false off web.
+  Future<bool> hasActivePushSubscription() async {
+    if (!kIsWeb) return false;
+    return await web_impl.getCurrentPushEndpoint() != null;
+  }
+
   /// Endpoint used by [unsubscribeFromWebPush] instead of asking the browser.
   ///
   /// Tests run on the VM, where the web implementation has no browser; this
