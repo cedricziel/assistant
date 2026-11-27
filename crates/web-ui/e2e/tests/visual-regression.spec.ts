@@ -689,6 +689,9 @@ test.describe("Authenticated pages", () => {
   test("settings screen", async ({ page }) => {
     await mockToolPermissionRules(page, TOOL_PERMISSION_RULES_FIXTURE);
     await navigateAndSettle(page, "/settings");
+    // The section reloads once the space selection resolves, so a second
+    // request reaches the mock. Wait for that as well before the screenshot.
+    await page.waitForTimeout(1_500);
     await expect(page).toHaveScreenshot("settings.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
