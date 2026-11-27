@@ -231,9 +231,9 @@ mod tests {
             .await;
         let store = InMemoryPushSubscriptionStore::new();
         for (path, user) in [("alice", OWNER), ("bob", "bob")] {
-            let subscriber =
-                p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
-            let p256dh = URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_encoded_point(false));
+            let subscriber = p256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+            let p256dh =
+                URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_sec1_point(false).as_bytes());
             store
                 .upsert(
                     &format!("{}/{path}", server.uri()),

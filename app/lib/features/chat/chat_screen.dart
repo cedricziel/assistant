@@ -14,6 +14,7 @@ import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
 import '../settings/response_timing_preference.dart';
 import 'attachment_provider.dart';
+import 'chat_announcer.dart';
 import 'chat_attachment_picker.dart';
 import 'chat_markdown_config.dart';
 import 'chat_provider.dart';
@@ -115,6 +116,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _inputController.dispose();
     _inputFocus.dispose();
     super.dispose();
+  }
+
+  /// Copies [code] to the clipboard and announces it, so the result of the
+  /// markdown code block's copy button is also heard.
+  Future<void> _copyCode(String code) async {
+    await Clipboard.setData(ClipboardData(text: code));
+    if (!mounted) return;
+    ref.read(chatAnnouncerProvider).say('Code copied');
   }
 
   Future<void> _sendMessage() async {
@@ -320,6 +329,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       },
     );
     return ChatMarkdownConfig(
+      onCopyCode: _copyCode,
       child: ToolResultRendererScope(
         resolve: _toolResultRegistry.build,
         child: pane,
