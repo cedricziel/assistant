@@ -87,7 +87,11 @@ pub async fn bootstrap(
         Arc::new(assistant_core::clock::SystemClock),
     ));
 
+    // Interactions are on in the process that runs turns (ADR-0017, D9): an
+    // undecided call on an interactive turn asks the turn's owner. A REPL
+    // keeps answering its own `Interface::Cli` turns through `confirmation_cb`.
     let mut runtimes = SpaceRuntimes::new(pools.clone(), orgs.clone(), confirmation_cb)
+        .with_interactions()
         .with_audio_store(Arc::new(assistant_transcription::AudioStore::new()))
         .with_turn_tool_source(integration_tools);
     if let Some(bus) = shared_nats_bus(&server).await? {
@@ -143,4 +147,41 @@ pub async fn bootstrap(
         orchestrator: default_space.orchestrator.clone(),
         user_skills_dir,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assistant_llm_provider::scripted::ScriptedLlmProvider;
+    use assistant_runtime::OrgContexts;
+
+    #[tokio::test]
+    async fn the_process_that_runs_turns_can_ask_the_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = OrgConfig::default();
+        config.memory.enabled = false;
+        let orgs = Arc::new(OrgContexts::fixed(
+            config,
+            Arc::new(ScriptedLlmProvider::new()),
+        ));
+        let bs = bootstrap(
+            root.path(),
+            None,
+            Arc::new(OrgPoolFactory::new(root.path())),
+            ServerConfig::default(),
+            orgs,
+        )
+        .await
+        .unwrap();
+
+        let runtime = bs
+            .runtimes
+            .get(DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG)
+            .await
+            .unwrap();
+        assert!(
+            runtime.interactions.is_some(),
+            "an undecided call goes to the turn's owner"
+        );
+    }
 }
