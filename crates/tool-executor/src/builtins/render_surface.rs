@@ -5,9 +5,6 @@
 //! org's URL policy and hands the validated surface back in `ToolOutput.data`.
 //! The runtime's surface hook (not this handler) assigns the surface id,
 //! persists it, merges updates and emits the event.
-//!
-//! Registered nowhere yet: `register_builtins` adds it once the clients that
-//! render surfaces have shipped.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

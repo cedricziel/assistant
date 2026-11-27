@@ -1075,7 +1075,7 @@ impl Orchestrator {
             )
             .collect();
 
-        let base_system_prompt = self.compose_system_prompt(&interface).await;
+        let base_system_prompt = self.compose_system_prompt(&interface, rich_client).await;
         let system_prompt = Self::build_extension_system_prompt(&base_system_prompt, &ext_specs);
 
         let mut turn_ended = false;
@@ -1525,7 +1525,7 @@ impl Orchestrator {
         );
 
         // 5. Build the system prompt fresh from disk.
-        let system_prompt = self.compose_system_prompt(&interface).await;
+        let system_prompt = self.compose_system_prompt(&interface, rich_client).await;
 
         // 6. Tool-calling loop.
         let mut turn_attachments: Vec<Attachment> = Vec::new();
