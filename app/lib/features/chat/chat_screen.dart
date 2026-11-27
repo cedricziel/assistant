@@ -1,9 +1,5 @@
-import 'dart:async';
-
-import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:desktop_drop/desktop_drop.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,10 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../shared/layout/breakpoints.dart';
 import '../../shared/platform/widgets.dart';
-import '../../api/api_client.dart';
-import '../../api/attachment_service.dart';
 import '../../api/capabilities_provider.dart';
-import '../../api/connectivity_provider.dart';
 import '../../api/models/server_capabilities.dart';
 import '../connection/connection_provider.dart';
 import '../personas/persona_picker.dart';
@@ -22,18 +15,16 @@ import '../personas/personas_provider.dart';
 import '../settings/response_timing_preference.dart';
 import 'attachment_provider.dart';
 import 'chat_announcer.dart';
-import 'chat_empty_starters.dart';
+import 'chat_attachment_picker.dart';
 import 'chat_markdown_config.dart';
-import 'chat_message_wiring.dart';
 import 'chat_provider.dart';
+import 'chat_screen_session.dart';
+import 'chat_send_message.dart';
+import 'chat_thread_pane.dart';
 import 'commands_provider.dart';
 import 'conversation_list.dart';
 import 'message_feedback_provider.dart';
-import 'image_utils.dart';
 import 'queued_message_remove_sheet.dart';
-import 'follow_up_chips.dart';
-import 'reconnect_banner.dart';
-import 'chat_timeline_entry.dart';
 import 'voice_recorder_button.dart';
 
 /// Feature flag for the stall-state "Skip" button that triggers
@@ -50,7 +41,7 @@ const bool kSkipButtonEnabled = true;
 /// Main chat screen.
 ///
 /// - Left panel: [ConversationListPane] (shown as drawer on narrow screens).
-/// - Right panel: message list + input row.
+/// - Right panel: [ChatThreadPane] with the thread and the composer.
 /// - App bar: active persona name + persona picker button.
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key, this.conversationId});
@@ -80,20 +71,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// in-place mutations (thinking tokens, tool status flips) that change no
   /// item count.
   int _revision = 0;
-  StreamSubscription<ChatLifecycleEvent>? _lifecycleSub;
+  late final ChatScreenSession _session;
 
   @override
   void initState() {
     super.initState();
-    // Turn lifecycle events, never token frames, drive screen-reader
-    // announcements; the streaming bubble is not a live region.
-    _lifecycleSub = ref
-        .read(chatProvider.notifier)
-        .lifecycle
-        .listen(ref.read(chatAnnouncerProvider).handle);
+    _session = ChatScreenSession(
+      ref: ref,
+      inputFocus: _inputFocus,
+      viewport: _threadController,
+      isMounted: () => mounted,
+    )..start();
     _inputFocus.addListener(_onInputFocusChange);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadConversation();
+      _session.load(widget.conversationId);
     });
   }
 
@@ -114,47 +105,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.didUpdateWidget(old);
     if (old.conversationId != widget.conversationId) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadConversation(focusInput: true);
+        _session.load(widget.conversationId, focusInput: true);
       });
-    }
-  }
-
-  void _loadConversation({bool focusInput = false}) {
-    final id = widget.conversationId;
-    if (id != null) {
-      ref.read(chatProvider.notifier).loadConversation(id);
-    } else {
-      ref.read(chatProvider.notifier).clearConversation();
-    }
-    _threadController.scrollToBottom();
-    if (focusInput) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _inputFocus.requestFocus();
-      });
-    }
-  }
-
-  /// Retry loading the conversation once the API client becomes available.
-  ///
-  /// On a hard reload / deep link, [_loadConversation] fires from [initState]
-  /// before the active context has finished loading, so [loadConversation]
-  /// finds no API client and returns immediately.  This listener fires when
-  /// [apiClientProvider] transitions null → non-null (initial context load) or
-  /// switches to a different client (context switch) and retriggers the load
-  /// if the conversation hasn't been set on the chat state yet.
-  void _onApiClientAvailable(ApiClient? prev, ApiClient? next) {
-    if (next == null || identical(prev, next)) return;
-    final id = widget.conversationId;
-    if (id == null) return;
-    final chatState = ref.read(chatProvider).value;
-    if (prev != null || chatState?.conversationId != id) {
-      _loadConversation();
     }
   }
 
   @override
   void dispose() {
-    unawaited(_lifecycleSub?.cancel());
+    _session.dispose();
     _inputFocus.removeListener(_onInputFocusChange);
     _inputController.dispose();
     _inputFocus.dispose();
@@ -180,64 +138,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _inputFocus.requestFocus();
     });
-
-    // Upload pending attachments first, then send with IDs.
-    final attachmentIds = <String>[];
-    final attachments = <ChatAttachment>[];
-    if (pending.isNotEmpty) {
-      ref.read(pendingAttachmentsProvider.notifier).clear();
-      final api = ref.read(apiClientProvider);
-      if (api != null) {
-        final chatState = ref.read(chatProvider).value ?? const ChatState();
-        var conversationId = chatState.conversationId;
-        // Create conversation if needed (mirrors ChatNotifier.sendMessage).
-        if (conversationId == null) {
-          final response = await api.conversations.createConversation(
-            createConversationRequest: CreateConversationRequest((b) => b),
-          );
-          final conv = response.data!;
-          conversationId = conv.id;
-          ref.read(conversationListProvider.notifier).prependConversation(conv);
-          ref.read(chatProvider.notifier).setConversationId(conversationId);
-        }
-        final service = AttachmentService(api.attachments);
-        for (final p in pending) {
-          try {
-            final meta = await service.upload(
-              conversationId: conversationId,
-              bytes: p.bytes,
-              filename: p.filename,
-              mimeType: p.mimeType,
-            );
-            attachmentIds.add(meta.id);
-            attachments.add(
-              ChatAttachment(
-                id: meta.id,
-                filename: meta.filename,
-                mimeType: meta.mimeType,
-                url: meta.url,
-              ),
-            );
-          } catch (e) {
-            // Log but don't block — the message will still be sent without
-            // the failed attachment.
-            debugPrint('Attachment upload failed for ${p.filename}: $e');
-          }
-        }
-      }
-    }
-
-    // Server rejects empty messages, so use a Unicode zero-width space when
-    // only images are attached. The bubble hides this when attachments exist.
-    final msg = text.isNotEmpty ? text : '\u200B';
-    await ref
-        .read(chatProvider.notifier)
-        .sendMessage(
-          msg,
-          attachmentIds: attachmentIds,
-          attachments: attachments,
-        );
-    _threadController.scrollToBottom();
+    await sendChatMessage(ref, text, viewport: _threadController);
   }
 
   Future<void> _sendVoiceMessage(Uint8List bytes, String mimeType) async {
@@ -245,64 +146,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _threadController.scrollToBottom();
   }
 
-  Future<void> _pickImages() async {
-    if (!ref.read(isOnlineProvider)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('File upload requires an internet connection'),
-          ),
-        );
-      }
-      return;
-    }
-
-    final files = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: [
-        'png',
-        'jpg',
-        'jpeg',
-        'gif',
-        'webp',
-        'heic',
-        'heif',
-        'pdf',
-        'txt',
-        'md',
-        'csv',
-        'json',
-      ],
-    );
-    final notifier = ref.read(pendingAttachmentsProvider.notifier);
-    for (final file in files) {
-      final fileBytes = await file.readAsBytes();
-      final mime = mimeFromExtension(file.extension);
-      if (isImageMimeType(mime) || mime == 'image/heic') {
-        // Image files may need HEIC→PNG conversion.
-        final (bytes, filename, normalizedMime) = await normalizeImage(
-          fileBytes,
-          file.name,
-          file.extension,
-        );
-        notifier.add(
-          PendingAttachment(
-            bytes: bytes,
-            filename: filename,
-            mimeType: normalizedMime,
-          ),
-        );
-      } else {
-        notifier.add(
-          PendingAttachment(
-            bytes: fileBytes,
-            filename: file.name,
-            mimeType: mime,
-          ),
-        );
-      }
-    }
-  }
+  Future<void> _pickImages() => pickChatAttachments(ref, context);
 
   /// Shows a failed feedback vote as a snackbar rather than the persistent
   /// thread error banner: the selection was already rolled back and the
@@ -323,7 +167,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Retry loading the conversation once the API client becomes available.
     // Handles deep-link / hard-reload races where the active context loads
     // after the first _loadConversation() call.
-    ref.listen<ApiClient?>(apiClientProvider, _onApiClientAvailable);
+    ref.listen(
+      apiClientProvider,
+      (previous, next) =>
+          _session.onApiClientAvailable(previous, next, widget.conversationId),
+    );
 
     final chatAsync = ref.watch(chatProvider);
     final chatState = chatAsync.value ?? const ChatState();
@@ -338,8 +186,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
 
     final personasAsync = ref.watch(personasProvider);
-    final activePersona = personasAsync.value?.activePersona;
-    final activePersonaName = activePersona?.name ?? 'Assistant';
+    final activePersonaName =
+        personasAsync.value?.activePersona?.name ?? 'Assistant';
 
     // Resolve capabilities only when an API client is available (avoids
     // triggering async work in tests that have no active profile).
@@ -351,22 +199,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Watch the active profile reactively so image auth headers update when
     // the profile loads (e.g. after a deep-link hard reload).
     final activeProfile = ref.watch(activeProfileProvider);
-    final imageBaseUrl = activeProfile?.baseUrl;
-    final imageAuthToken = activeProfile?.token;
-
-    final chatActions = [
-      IconButton(
-        key: const Key('persona_picker_button'),
-        icon: const Icon(Icons.switch_account_outlined),
-        tooltip: 'Switch persona',
-        onPressed: () => showPersonaPicker(context),
-      ),
-      IconButton(
-        icon: const Icon(Icons.extension_outlined),
-        tooltip: 'Skills',
-        onPressed: () => context.go('/skills'),
-      ),
-    ];
 
     // Hoisted: `ref.watch` is only valid while building, not inside the
     // LayoutBuilder callback below.
@@ -378,7 +210,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // The inline list / drawer decision compares the chat pane's own width
     // (the window minus the nav sidebar), so it sits above the Scaffold,
     // which it drives (body, app bar leading, drawer).
-    final thread = LayoutBuilder(
+    final pane = LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= Breakpoints.wide;
         final threadWidth =
@@ -398,10 +230,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       onPressed: () => Scaffold.of(ctx).openDrawer(),
                     ),
                   ),
-            actions: chatActions,
+            actions: [
+              IconButton(
+                key: const Key('persona_picker_button'),
+                icon: const Icon(Icons.switch_account_outlined),
+                tooltip: 'Switch persona',
+                onPressed: () => showPersonaPicker(context),
+              ),
+              IconButton(
+                icon: const Icon(Icons.extension_outlined),
+                tooltip: 'Skills',
+                onPressed: () => context.go('/skills'),
+              ),
+            ],
           ),
-
-          // Drawer on narrow screens.
           drawer: isWide
               ? null
               : Drawer(
@@ -412,16 +254,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     ),
                   ),
                 ),
-
           body: GestureDetector(
             onTap: () => FocusScope.of(context).unfocus(),
             child: Row(
               children: [
-                // Conversation list sidebar (wide screens only).
                 if (isWide)
                   SizedBox(
                     width: _kConversationListWidth,
-                    child: Container(
+                    child: DecoratedBox(
                       decoration: BoxDecoration(
                         border: Border(
                           right: BorderSide(
@@ -434,31 +274,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       ),
                     ),
                   ),
-
                 // Chat area with drop target for file attachments.
                 Expanded(
                   child: DropTarget(
-                    onDragDone: (details) {
-                      final notifier = ref.read(
-                        pendingAttachmentsProvider.notifier,
-                      );
-                      for (final file in details.files) {
-                        file.readAsBytes().then((bytes) {
-                          final ext = file.name.split('.').last;
-                          final mime = mimeFromExtension(ext);
-                          if (isSupportedMimeType(mime)) {
-                            notifier.add(
-                              PendingAttachment(
-                                bytes: bytes,
-                                filename: file.name,
-                                mimeType: mime,
-                              ),
-                            );
-                          }
-                        });
-                      }
-                    },
-                    child: ChatThreadLayout(
+                    onDragDone: (details) =>
+                        addDroppedAttachments(ref, details.files),
+                    child: ChatThreadPane(
+                      chatState: chatState,
                       banners: [
                         if (chatState.error != null &&
                             chatState.error != kFeedbackSaveErrorMessage)
@@ -471,196 +293,64 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         if (chatState.isLoadingHistory)
                           const LinearProgressIndicator(),
                       ],
-                      thread: ThreadDensityScope.fromWidth(
-                        width: threadWidth,
-                        child:
-                            chatState.messages.isEmpty &&
-                                chatState.pendingQueue.isEmpty
-                            ? const ChatEmptyStarters()
-                            : ThreadViewport(
-                                controller: _threadController,
-                                revision: _revision,
-                                itemCount:
-                                    chatState.messages.length +
-                                    chatState.pendingQueue.length,
-                                itemBuilder: (context, index) {
-                                  // Render queued ghost bubbles after the
-                                  // committed messages, in send order. The
-                                  // actively-streaming message is already in
-                                  // `messages` (it was popped from the queue
-                                  // when its stream started), so ghost
-                                  // bubbles represent only the truly-waiting
-                                  // items.
-                                  if (index >= chatState.messages.length) {
-                                    final queueIdx =
-                                        index - chatState.messages.length;
-                                    final pending =
-                                        chatState.pendingQueue[queueIdx];
-                                    return QueuedMessageBubble(
-                                      message: pending,
-                                      onLongPress: () =>
-                                          showQueuedMessageRemoveSheet(
-                                            context,
-                                            ref,
-                                            pending,
-                                            queueIdx,
-                                          ),
-                                    );
-                                  }
-
-                                  final msg = chatState.messages[index];
-
-                                  // Render non-message timeline entries
-                                  // (thinking, tool call, subagent, command)
-                                  // as streaming-aware adaptive sections.
-                                  if (msg.timelineType !=
-                                      TimelineEntryType.message) {
-                                    return ChatTimelineEntry(
-                                      message: msg,
-                                      conversationId: chatState.conversationId,
-                                      entryState: timelineEntryState(msg),
-                                      onInteractionAnswer: (id, answer) => ref
-                                          .read(chatProvider.notifier)
-                                          .respond(id, answer),
-                                    );
-                                  }
-
-                                  final prevMsg = index > 0
-                                      ? chatState.messages[index - 1]
-                                      : null;
-                                  final isGrouped =
-                                      prevMsg != null &&
-                                      prevMsg.role == msg.role &&
-                                      !prevMsg.isStreaming;
-                                  return ChatMessageActionsWiring(
-                                    message: msg,
-                                    senderLabel: msg.isUser
-                                        ? 'You'
-                                        : activePersonaName,
-                                    isGrouped: isGrouped,
-                                    capabilities: capabilities,
-                                    onFeedbackChanged: (rating) => ref
-                                        .read(chatProvider.notifier)
-                                        .setMessageRating(msg.id, rating),
-                                    feedbackComment:
-                                        feedbackState.commentFields[msg.id] ==
-                                            null
-                                        ? null
-                                        : FeedbackCommentField(
-                                            key: ValueKey(
-                                              'feedback_comment_${msg.id}_${feedbackState.commentFields[msg.id]}',
-                                            ),
-                                            initialText: msg.feedback?.comment,
-                                            sending: feedbackState.pending
-                                                .containsKey(msg.id),
-                                            onSubmit: (comment) => ref
-                                                .read(chatProvider.notifier)
-                                                .submitMessageFeedbackComment(
-                                                  msg.id,
-                                                  comment,
-                                                ),
-                                            onDismiss: () => ref
-                                                .read(chatProvider.notifier)
-                                                .dismissMessageFeedbackComment(
-                                                  msg.id,
-                                                ),
-                                          ),
-                                    onRetry: msg.status == MessageStatus.failed
-                                        ? () => ref
-                                              .read(chatProvider.notifier)
-                                              .retryMessage(msg)
-                                        : null,
-                                    isStopping: chatState.isStopping,
-                                    showResponseTiming: showResponseTiming,
-                                    onStop: () => ref
-                                        .read(chatProvider.notifier)
-                                        .stopTurn(),
-                                    fetchMessageAudio: () {
-                                      final api = ref.read(apiClientProvider);
-                                      final audioId = msg.audioId;
-                                      if (audioId != null) {
-                                        return api?.fetchAudio(audioId) ??
-                                            Future.value(null);
-                                      }
-                                      // On-demand TTS synthesis.
-                                      return api?.fetchMessageAudio(msg.id) ??
-                                          Future.value(null);
-                                    },
-                                    imageBaseUrl: imageBaseUrl,
-                                    imageAuthToken: imageAuthToken,
-                                  );
-                                },
-                              ),
+                      threadWidth: threadWidth,
+                      threadController: _threadController,
+                      revision: _revision,
+                      capabilities: capabilities,
+                      pendingAttachments: pendingAttachments,
+                      commands: commands,
+                      inputController: _inputController,
+                      inputFocus: _inputFocus,
+                      activePersonaName: activePersonaName,
+                      showResponseTiming: showResponseTiming,
+                      feedbackState: feedbackState,
+                      onFeedbackChanged: (message, rating) => ref
+                          .read(chatProvider.notifier)
+                          .setMessageRating(message.id, rating),
+                      onSubmitFeedbackComment: (message, comment) => ref
+                          .read(chatProvider.notifier)
+                          .submitMessageFeedbackComment(message.id, comment),
+                      onDismissFeedbackComment: (message) => ref
+                          .read(chatProvider.notifier)
+                          .dismissMessageFeedbackComment(message.id),
+                      showSkip: kSkipButtonEnabled,
+                      showVoice: capabilities.voiceSend,
+                      voiceButton: VoiceRecorderButton(
+                        onRecordingComplete: _sendVoiceMessage,
+                        onError: (error) {
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(SnackBar(content: Text(error)));
+                        },
                       ),
-                      aboveComposer: [
-                        // Brief banner shown while attemptReconnect is
-                        // recovering an interrupted stream after a resume.
-                        // Renders nothing on routine foreground transitions.
-                        const ReconnectBanner(),
-                        // Follow-up prompts after a finished turn.
-                        const FollowUpChips(),
-                        // In-flight turn progress card — renders nothing when no
-                        // turn is active, an activity label otherwise, a stall
-                        // label after 30s of silence.
-                        TurnProgressCard(
-                          status: chatState.currentTurnStatus,
-                          showSkip: kSkipButtonEnabled,
-                          awaitingLabel:
-                              chatState.currentTurnStatus?.awaitingLabel,
-                          // The SSE stream surfaces the server-side
-                          // cancellation as `agent_error`, which the notifier
-                          // reconciles.
-                          onSkip: ref.read(chatProvider.notifier).stopTurn,
-                        ),
-                      ],
-                      composer: Composer(
-                        controller: _inputController,
-                        focusNode: _inputFocus,
-                        isSending: chatState.isSending,
-                        isStopping: chatState.isStopping,
-                        pendingQueueCount: chatState.pendingQueue.length,
-                        pendingAttachments: pendingAttachments,
-                        commands: commands,
-                        showVoice: capabilities.voiceSend,
-                        voiceButton: VoiceRecorderButton(
-                          onRecordingComplete: _sendVoiceMessage,
-                          onError: (err) {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(SnackBar(content: Text(err)));
-                          },
-                        ),
-                        inputBuilder:
-                            (
-                              context,
-                              controller,
-                              focusNode,
-                              placeholder,
-                              onSubmit,
-                            ) => AdaptiveTextField(
-                              key: const Key('message_input'),
-                              controller: controller,
-                              focusNode: focusNode,
-                              placeholder: placeholder,
-                              cursorColor: Theme.of(context)
-                                  .colorScheme
-                                  .primary,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 10,
-                              ),
-                              minLines: 1,
-                              maxLines: 6,
-                              textInputAction: TextInputAction.send,
-                              onSubmitted: (_) => onSubmit(),
-                            ),
-                        onSend: _sendMessage,
-                        onStop: () =>
-                            ref.read(chatProvider.notifier).stopTurn(),
-                        onPickImage: _pickImages,
-                        onRemoveAttachment: (i) => ref
-                            .read(pendingAttachmentsProvider.notifier)
-                            .removeAt(i),
-                      ),
+                      imageBaseUrl: activeProfile?.baseUrl,
+                      imageAuthToken: activeProfile?.token,
+                      onSend: _sendMessage,
+                      onStop: ref.read(chatProvider.notifier).stopTurn,
+                      onPickImage: _pickImages,
+                      onRemoveAttachment: (index) => ref
+                          .read(pendingAttachmentsProvider.notifier)
+                          .removeAt(index),
+                      onShowQueuedMessage: (message, index) =>
+                          showQueuedMessageRemoveSheet(
+                            context,
+                            ref,
+                            message,
+                            index,
+                          ),
+                      onInteractionAnswer: (id, answer) =>
+                          ref.read(chatProvider.notifier).respond(id, answer),
+                      onRetry: (message) =>
+                          ref.read(chatProvider.notifier).retryMessage(message),
+                      fetchMessageAudio: (message) {
+                        final api = ref.read(apiClientProvider);
+                        final audioId = message.audioId;
+                        if (audioId != null) {
+                          return api?.fetchAudio(audioId) ?? Future.value(null);
+                        }
+                        // On-demand TTS synthesis.
+                        return api?.fetchMessageAudio(message.id) ??
+                            Future.value(null);
+                      },
                     ),
                   ),
                 ),
@@ -674,7 +364,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       onCopyCode: _copyCode,
       child: ToolResultRendererScope(
         resolve: _toolResultRegistry.build,
-        child: thread,
+        child: pane,
       ),
     );
   }
