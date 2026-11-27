@@ -630,10 +630,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_smooth_markdown
-      sha256: "659e16ea73e5259cbe61dcde830b9887be2749aeed135fa24731c383b062e329"
+      sha256: dfcb0da9f746d896de46c6fdb36b3194f4382de628d7c85a4e1106363e7bdd34
       url: "https://pub.dev"
     source: hosted
-    version: "0.8.1"
+    version: "0.11.0"
   flutter_svg:
     dependency: "direct main"
     description:
@@ -741,7 +741,7 @@ packages:
     source: hosted
     version: "0.7.0"
   hooks:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
       name: hooks
       sha256: eaac480a35ec0814146c2c48d96aaa829e0e44a7662c88ae84c9edf4bc35651f
