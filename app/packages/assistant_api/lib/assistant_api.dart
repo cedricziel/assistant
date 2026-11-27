@@ -203,6 +203,7 @@ export 'package:assistant_api/src/model/stream_run_events_query.dart';
 export 'package:assistant_api/src/model/string_list.dart';
 export 'package:assistant_api/src/model/subscribe_request.dart';
 export 'package:assistant_api/src/model/subscription_response.dart';
+export 'package:assistant_api/src/model/surface_action_request.dart';
 export 'package:assistant_api/src/model/surface_summary.dart';
 export 'package:assistant_api/src/model/switch_branch_request.dart';
 export 'package:assistant_api/src/model/task.dart';
