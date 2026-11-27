@@ -14,7 +14,7 @@ part 'sse_interaction_requested_event.g.dart';
 /// * [createdAt]
 /// * [expiresAt]
 /// * [interactionId]
-/// * [kind] - `tool_approval`, `question`, or a kind a newer server added.
+/// * [kind] - `tool_approval`, `question`, `surface_action`, or a kind a newer server added.
 /// * [rendersCard] - Whether the kind renders a card in the timeline.
 /// * [toolCallId] - Provider id of the tool call this belongs to, when there is one.
 @BuiltValue()
@@ -31,7 +31,7 @@ abstract class SseInteractionRequestedEvent
   @BuiltValueField(wireName: r'interaction_id')
   String get interactionId;
 
-  /// `tool_approval`, `question`, or a kind a newer server added.
+  /// `tool_approval`, `question`, `surface_action`, or a kind a newer server added.
   @BuiltValueField(wireName: r'kind')
   String get kind;
 

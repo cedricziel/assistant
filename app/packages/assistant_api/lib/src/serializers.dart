@@ -132,6 +132,7 @@ import 'package:assistant_api/src/model/respond_to_interaction_request.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of1.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of3.dart';
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
 import 'package:assistant_api/src/model/rule_scope.dart';
@@ -341,6 +342,7 @@ part 'serializers.g.dart';
   RespondToInteractionRequestOneOf,
   RespondToInteractionRequestOneOf1,
   RespondToInteractionRequestOneOf2,
+  RespondToInteractionRequestOneOf3,
   Role,
   RotateSecretResponse,
   RuleScope,

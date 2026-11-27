@@ -17,7 +17,7 @@ part 'interaction_detail.g.dart';
 /// * [createdAt]
 /// * [expiresAt]
 /// * [interactionId]
-/// * [kind] - `tool_approval`, `question`, or a kind a newer server added.
+/// * [kind] - `tool_approval`, `question`, `surface_action`, or a kind a newer server added.
 /// * [rendersCard] - Whether the kind renders a card in the timeline.
 /// * [request] - The kind-specific request (for `tool_approval`: `tool_name`, `arguments`, `arguments_truncated`, `reason`, `options`, `suggested_rule`; for `question`: `questions`).
 /// * [resolvedAt]
@@ -41,7 +41,7 @@ abstract class InteractionDetail
   @BuiltValueField(wireName: r'interaction_id')
   String get interactionId;
 
-  /// `tool_approval`, `question`, or a kind a newer server added.
+  /// `tool_approval`, `question`, `surface_action`, or a kind a newer server added.
   @BuiltValueField(wireName: r'kind')
   String get kind;
 

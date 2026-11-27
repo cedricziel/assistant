@@ -13239,7 +13239,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "`tool_approval`, `question`, or a kind a newer server added."
+            "description": "`tool_approval`, `question`, `surface_action`, or a kind a newer server added."
           },
           "renders_card": {
             "type": "boolean",
@@ -14529,6 +14529,33 @@
           },
           {
             "type": "object",
+            "description": "Answers a `surface_action` interaction with an A2UI action the surface\ndeclares, and optionally the surface's data model.",
+            "required": [
+              "action",
+              "kind"
+            ],
+            "properties": {
+              "action": {
+                "type": "object",
+                "description": "The action object: `name` (a Button action the surface declares),\nplus `sourceComponentId` and `context` when the client has them."
+              },
+              "data_model": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "The surface's data model at the time of the action."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "surface_action"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "\"I won't answer\", for any kind. For an approval this means reject once.",
             "required": [
               "kind"
@@ -15116,7 +15143,7 @@
               },
               "kind": {
                 "type": "string",
-                "description": "`tool_approval`, `question`, or a kind a newer server added."
+                "description": "`tool_approval`, `question`, `surface_action`, or a kind a newer server added."
               },
               "renders_card": {
                 "type": "boolean",
