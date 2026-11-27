@@ -296,14 +296,13 @@ pub(crate) async fn split_process_state(llm_url: &str) -> (ApiState, Arc<Storage
 pub(crate) async fn split_process_state_with_approvals(
     llm_url: &str,
     config: OrgConfig,
-) -> (ApiState, Arc<StorageLayer>) {
+) -> (ApiState, ApiState, Arc<StorageLayer>) {
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let spaces = [default_space(&storage)];
     let root = Path::new("/nonexistent/assistant-test-root");
     let (state, _) = state_over_runtimes(root, llm_url, &spaces, false, config.clone(), true).await;
-    let _orchestrator_process =
-        state_over_runtimes(root, llm_url, &spaces, true, config, true).await;
-    (state, storage)
+    let (worker, _) = state_over_runtimes(root, llm_url, &spaces, true, config, true).await;
+    (state, worker, storage)
 }
 
 pub(crate) fn default_space(storage: &Arc<StorageLayer>) -> TestSpace {
