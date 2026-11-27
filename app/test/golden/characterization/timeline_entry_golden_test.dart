@@ -2,7 +2,6 @@
 library;
 
 import 'package:assistant_app/features/chat/chat_provider.dart';
-import 'package:assistant_app/features/chat/command_event_tile.dart';
 import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -268,7 +267,7 @@ void main() {
   });
 
   // StreamingTimelineEntry renders nothing for command entries; the chat
-  // screen draws them with CommandEventTile, which is what is captured here.
+  // screen draws them with CommandBody, which is what is captured here.
   group('command', () {
     testWidgets('StreamingTimelineEntry renders nothing', (tester) async {
       await pumpGolden(
@@ -286,9 +285,10 @@ void main() {
           TimelineDensity.normal => 500.0,
           TimelineDensity.expanded => 760.0,
         };
+        final command = _command();
         await pumpGolden(
           tester,
-          CommandEventTile(message: _command()),
+          CommandBody(name: command.commandName!, ack: command.commandAckText!),
           size: Size(width, 60),
         );
         await tester.pump(const Duration(milliseconds: 50));
