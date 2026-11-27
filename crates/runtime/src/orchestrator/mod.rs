@@ -63,7 +63,7 @@ mod worker;
 mod tests;
 
 pub use branch::{BRANCH_CANCEL_WAIT, BranchConflict};
-pub use cancelled_reply::CANCELLED_REPLY_PLACEHOLDER;
+pub use cancelled_reply::{CANCELLED_REPLY_PLACEHOLDER, CancelledTurn};
 pub use relay::RunEventRelay;
 pub use stream_event::OrchestratorEvent;
 pub use submit::SubmitTurn;

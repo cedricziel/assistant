@@ -1187,6 +1187,57 @@ mod tests {
         assert_eq!(t.active_texts().await, ["U1", "A1", "U2", "A2 again"]);
     }
 
+    // -- cancelled regenerate --------------------------------------------------
+
+    #[tokio::test]
+    async fn a_cancelled_regenerate_keeps_the_old_reply_as_the_other_version() {
+        let server = MockServer::start().await;
+        mount_slow_llm(&server, "never arrives", Duration::from_secs(30)).await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let t = seed(&storage).await;
+        let orchestrator = orchestrator(&state).await;
+
+        let resp = regenerate(state, t.conv, t.u2).await;
+        let run_id = Uuid::parse_str(
+            resp.headers()
+                .get("x-run-id")
+                .and_then(|v| v.to_str().ok())
+                .expect("X-Run-Id header"),
+        )
+        .unwrap();
+        // Cancel once a worker claimed the turn and called the LLM.
+        for _ in 0..200 {
+            if !server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(orchestrator.is_turn_in_flight(run_id).await, "claimed");
+        orchestrator.cancel_turn(run_id).await;
+        let frames = frames(resp).await;
+
+        let (event, payload) = frames.last().unwrap();
+        assert_eq!(event, "agent_error");
+        assert_eq!(payload["reason"], "cancelled");
+        let stopped = Uuid::parse_str(payload["message_id"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            t.active_texts().await,
+            ["U1", "A1", "U2", "_Stopped._"],
+            "the stop is a reply to U2 on the active path"
+        );
+        let replies = t.store.children_of(t.conv, Some(t.u2)).await.unwrap();
+        assert_eq!(
+            replies.iter().map(|m| m.id).collect::<Vec<_>>(),
+            [t.a2, stopped],
+            "the old reply stays reachable as a sibling"
+        );
+    }
+
     // -- send_message: user_message_id -----------------------------------------
 
     #[tokio::test]

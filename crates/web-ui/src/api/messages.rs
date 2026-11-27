@@ -709,10 +709,19 @@ pub(crate) async fn stream_turn_to_sse(
                 before_start: false
             }
         ) {
+            let cancelled_turn = assistant_runtime::CancelledTurn {
+                run_id,
+                anchor: opts.anchor.clone(),
+            };
             let persisted = match &orchestrator {
                 Some(orchestrator) => {
                     orchestrator
-                        .persist_cancelled_reply(conv_id, &reply_text, &Interface::Web)
+                        .persist_cancelled_reply(
+                            conv_id,
+                            &reply_text,
+                            &Interface::Web,
+                            &cancelled_turn,
+                        )
                         .await
                 }
                 None => Err(anyhow::anyhow!("no runtime for the conversation")),
@@ -3167,6 +3176,55 @@ mod tests {
         assert!(payload.get("message_id").is_none());
         assert_eq!(payload["partial_content"], "", "no placeholder either");
         assert!(history_of(&state, conv_id).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn runner_cancelled_before_start_keeps_the_old_reply_of_a_regenerate() {
+        use assistant_core::types::conversation::Message;
+
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let user = Message::user(conv_id, "original");
+        store.save_message(&user).await.unwrap();
+        let old = Message::assistant(conv_id, "Old reply");
+        store.save_message(&old).await.unwrap();
+
+        let opts = RunOptions {
+            suggestions: false,
+            ..RunOptions::web_turn(TurnAnchor::Regenerate {
+                user_message_id: user.id,
+            })
+        };
+        let (_, frames) = run_runner_in(
+            &state,
+            &storage,
+            conv_id,
+            opts,
+            vec![],
+            Some(Err(anyhow::anyhow!(
+                "{} before it started ({})",
+                assistant_runtime::TURN_CANCELLED_MARKER,
+                assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER
+            ))),
+        )
+        .await;
+
+        let payload = last_payload(&frames);
+        assert_eq!(payload["user_message_persisted"], false);
+        assert!(payload.get("message_id").is_none(), "{payload}");
+        let history = history_of(&state, conv_id).await;
+        assert_eq!(
+            history
+                .iter()
+                .map(|m| m["id"].as_str().unwrap_or_default().to_string())
+                .collect::<Vec<_>>(),
+            [user.id.to_string(), old.id.to_string()],
+            "the old reply stays the active leaf"
+        );
+        assert_eq!(history[1]["content"], "Old reply");
+        assert_eq!(history[1]["finish_reason"], serde_json::Value::Null);
     }
 
     #[tokio::test]
