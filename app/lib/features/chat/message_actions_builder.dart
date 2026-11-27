@@ -55,8 +55,9 @@ bool _showsFeedback(ChatMessage message) =>
 /// has two or more entries. A message with `branch`, or a user message whose
 /// reply has no visible row and carries `replyBranch`, gets a [BranchPicker]
 /// in the leading slot, wired to [onSwitchBranch] with the id of the sibling
-/// version to show; the picker is busy while [turnWorking]. All of these stay
-/// off until their callbacks are supplied.
+/// version to show; the picker is busy while [turnWorking], and its tooltip
+/// names the model when the reply was produced by a non-default one. All of
+/// these stay off until their callbacks are supplied.
 Widget buildMessageActions({
   required ChatMessage message,
   required ServerCapabilities capabilities,
@@ -109,6 +110,15 @@ Widget buildMessageActions({
       !isUser &&
       onRegenerateWith != null &&
       regenerateModels.length >= 2;
+  final defaultModel = _defaultModel(regenerateModels);
+  final modelLabel =
+      isPersisted &&
+          !isUser &&
+          branch != null &&
+          message.model != null &&
+          message.model != defaultModel
+      ? message.model
+      : null;
 
   return Builder(
     builder: (context) {
@@ -121,6 +131,7 @@ Widget buildMessageActions({
                 index: branch.index,
                 count: branch.count,
                 busy: turnWorking,
+                model: modelLabel,
                 onPrevious: () =>
                     onSwitchBranch(branch.siblingIds[branch.index - 1]),
                 onNext: () =>
@@ -236,4 +247,12 @@ Widget buildMessageActions({
 Rect? _origin(BuildContext context) {
   final box = context.findRenderObject() as RenderBox?;
   return box != null ? box.localToGlobal(Offset.zero) & box.size : null;
+}
+
+/// The org's default model, or null while the list is loading or failed.
+String? _defaultModel(List<RegenerateModel> models) {
+  for (final model in models) {
+    if (model.isDefault) return model.name;
+  }
+  return null;
 }

@@ -109,7 +109,7 @@ InteractionDetail _interaction({
 
 void main() {
   group('chatMessagesFromHistory', () {
-    test('carries parentId, branch and replyBranch onto ChatMessage', () {
+    test('carries parentId, branch and model onto ChatMessage', () {
       final rows = [
         MessageSummary(
           (b) => b
@@ -119,6 +119,7 @@ void main() {
             ..turn = 1
             ..createdAt = DateTime.parse('2026-05-16T00:00:00Z')
             ..ttsAvailable = false
+            ..model = 'model-b'
             ..parentId = 'a1'
             ..branch.replace(
               BranchInfo(
@@ -148,6 +149,7 @@ void main() {
       expect(out.replyBranch?.count, 3);
       expect(out.replyBranch?.index, 2);
       expect(out.replyBranch?.siblingIds, ['r1', 'r2', 'r3']);
+      expect(out.model, 'model-b');
     });
 
     test('maps timing onto the row that carries it', () {

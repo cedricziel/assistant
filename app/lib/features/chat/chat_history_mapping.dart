@@ -136,6 +136,7 @@ List<ChatMessage> chatMessagesFromHistory(
           timing: _timingFromHistory(m.timing),
           branch: _branchFromApi(m.branch),
           replyBranch: _branchFromApi(m.replyBranch),
+          model: m.model,
           attachments: attachments
               ?.map(
                 (a) => ChatAttachment(

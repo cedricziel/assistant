@@ -109,5 +109,29 @@ void main() {
       expect(find.bySemanticsLabel('Version 2 of 3'), findsOneWidget);
       handle.dispose();
     });
+
+    testWidgets('states the model that produced the version', (tester) async {
+      await pumpGolden(
+        tester,
+        BranchPicker(
+          index: 1,
+          count: 2,
+          model: 'model-b',
+          onPrevious: () {},
+          onNext: () {},
+        ),
+      );
+
+      expect(find.byTooltip('model-b'), findsOneWidget);
+    });
+
+    testWidgets('has no model tooltip without a model', (tester) async {
+      await pumpGolden(
+        tester,
+        BranchPicker(index: 1, count: 2, onPrevious: () {}, onNext: () {}),
+      );
+
+      expect(find.byTooltip('model-b'), findsNothing);
+    });
   });
 }

@@ -10,6 +10,7 @@ import 'package:assistant_app/api/models/server_profile.dart';
 import 'package:assistant_app/features/chat/audio_player_widget.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
+import 'package:assistant_app/features/chat/models_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
 import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
@@ -187,6 +188,7 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
     ProviderScope(
       overrides: [
         chatProvider.overrideWith(() => chatNotifier),
+        modelsProvider.overrideWith((ref) async => const []),
         personasProvider.overrideWith(() => _FakePersonasNotifier()),
         conversationListProvider.overrideWith(
           () => _FakeConversationListNotifier(),

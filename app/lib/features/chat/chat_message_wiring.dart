@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../api/models/server_capabilities.dart';
 import 'chat_provider.dart';
 import 'message_bubble.dart';
+import 'models_provider.dart';
 
 /// Wires a message's branching actions to [ChatNotifier], keeping the
 /// timeline's item builder out of it.
@@ -76,6 +77,8 @@ class _ChatMessageActionsWiringState
     final turnWorking = (chat?.isSending ?? false) && !awaitingInput;
     final busy = turnWorking || (chat?.isSwitchingBranch ?? false);
     final isPersisted = _isPersisted(widget.message);
+    final models =
+        ref.watch(modelsProvider).asData?.value ?? const <RegenerateModel>[];
 
     if (_editing) return _editor(notifier);
 
@@ -99,6 +102,11 @@ class _ChatMessageActionsWiringState
       onRegenerate: isPersisted
           ? () => unawaited(notifier.regenerate(widget.message.id))
           : null,
+      onRegenerateWith: isPersisted
+          ? (model) =>
+                unawaited(notifier.regenerate(widget.message.id, model: model))
+          : null,
+      regenerateModels: models,
       onSwitchBranch: (messageId) =>
           unawaited(notifier.switchBranch(messageId)),
     );

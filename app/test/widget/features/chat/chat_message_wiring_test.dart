@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:assistant_app/api/models/server_capabilities.dart';
 import 'package:assistant_app/features/chat/chat_message_wiring.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
+import 'package:assistant_app/features/chat/models_provider.dart';
 import 'package:assistant_app/shared/platform/adaptive_app.dart';
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +13,7 @@ import 'package:material_ui/material_ui.dart';
 class _FakeChatNotifier extends ChatNotifier {
   final List<(String, String)> edits = [];
   final List<String> regenerates = [];
+  final List<(String, String?)> regeneratesWith = [];
   final List<String> switched = [];
 
   ChatState _initial = const ChatState();
@@ -36,6 +38,7 @@ class _FakeChatNotifier extends ChatNotifier {
   @override
   Future<void> regenerate(String messageId, {String? model}) async {
     regenerates.add(messageId);
+    regeneratesWith.add((messageId, model));
   }
 
   @override
@@ -74,11 +77,19 @@ ChatMessage _assistant({String id = _replyId}) =>
 
 Future<({_FakeChatNotifier chat, void Function(ChatState) push})> _pump(
   WidgetTester tester,
-  ChatMessage message,
-) async {
+  ChatMessage message, {
+  List<RegenerateModel> models = const [],
+  bool modelsFail = false,
+}) async {
   final chat = _FakeChatNotifier();
   final container = ProviderContainer(
-    overrides: [chatProvider.overrideWith(() => chat)],
+    overrides: [
+      chatProvider.overrideWith(() => chat),
+      modelsProvider.overrideWith(
+        (ref) async =>
+            modelsFail ? throw Exception('models unavailable') : models,
+      ),
+    ],
   );
   addTearDown(container.dispose);
   container.listen(chatProvider, (_, _) {});
@@ -284,6 +295,47 @@ void main() {
       await tester.pump();
 
       expect(find.byKey(const Key('regenerate_action')), findsNothing);
+    });
+
+    testWidgets('the model menu regenerates on the chosen model', (
+      tester,
+    ) async {
+      final harness = await _pump(
+        tester,
+        _assistant(),
+        models: const [
+          RegenerateModel(name: 'model-a', isDefault: true),
+          RegenerateModel(name: 'model-b'),
+        ],
+      );
+      harness.push(const ChatState(conversationId: 'c1'));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('regenerate_with_action')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('model-b'));
+      await tester.pumpAndSettle();
+
+      expect(harness.chat.regeneratesWith, [(_replyId, 'model-b')]);
+    });
+
+    testWidgets('a single model or a failed list hides the menu', (
+      tester,
+    ) async {
+      final single = await _pump(
+        tester,
+        _assistant(),
+        models: const [RegenerateModel(name: 'only', isDefault: true)],
+      );
+      single.push(const ChatState(conversationId: 'c1'));
+      await tester.pump();
+      expect(find.byType(RegenerateMenuButton), findsNothing);
+
+      final failed = await _pump(tester, _assistant(), modelsFail: true);
+      failed.push(const ChatState(conversationId: 'c1'));
+      await tester.pump();
+      expect(find.byType(RegenerateMenuButton), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   });
 }
