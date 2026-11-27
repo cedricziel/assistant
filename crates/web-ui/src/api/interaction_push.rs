@@ -173,6 +173,7 @@ mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use chrono::Utc;
+    use p256::elliptic_curve::{Generate as _, sec1::ToSec1Point as _};
     use serde_json::json;
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -231,9 +232,9 @@ mod tests {
             .await;
         let store = InMemoryPushSubscriptionStore::new();
         for (path, user) in [("alice", OWNER), ("bob", "bob")] {
-            let subscriber =
-                p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
-            let p256dh = URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_encoded_point(false));
+            let subscriber = p256::ecdsa::SigningKey::try_generate()
+                .expect("OS RNG should be available in tests");
+            let p256dh = URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_sec1_point(false));
             store
                 .upsert(
                     &format!("{}/{path}", server.uri()),
