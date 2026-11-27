@@ -93,6 +93,25 @@ void main() {
   });
 
   group('MessageActionButton', () {
+    testWidgets('its hit area is at least 24x24 (WCAG 2.2 SC 2.5.8)', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          MessageActionButton(
+            key: const Key('a'),
+            icon: Icons.copy,
+            label: 'Copy',
+            onPressed: () {},
+          ),
+        ),
+      );
+
+      final size = tester.getSize(find.byKey(const Key('a')));
+      expect(size.width, greaterThanOrEqualTo(24));
+      expect(size.height, greaterThanOrEqualTo(24));
+    });
+
     testWidgets('fires onPressed on tap', (tester) async {
       var taps = 0;
       await tester.pumpWidget(

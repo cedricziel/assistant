@@ -399,14 +399,12 @@ pub struct Orchestrator {
     /// Where each turn gets the tools only it may see, with the space it is
     /// asked for.
     pub(crate) turn_tool_source: Option<TurnToolBinding>,
-    /// Where interactive web turns put questions to their owner. `None`
-    /// leaves the `ask-user` tool out of every turn.
+    /// Where interactive turns put questions to their owner and wait on a
+    /// `surface_action`. `None` leaves the `ask-user` tool out of every turn
+    /// and shows a surface that asks to be waited on without waiting.
     pub(crate) interaction_broker: Option<Arc<crate::interaction::InteractionBroker>>,
     /// Where `render-surface` results are persisted (see `surface_hook`).
     pub(crate) surface_store: Arc<dyn assistant_storage::SurfaceStore>,
-    /// Where a turn waits on a `surface_action` interaction. Without one, a
-    /// surface that asks to be waited on is shown and the turn goes on.
-    pub(crate) interaction_broker: Option<Arc<crate::interaction::InteractionBroker>>,
 }
 
 /// A [`TurnToolSource`] bound to the space this orchestrator runs.
@@ -475,7 +473,6 @@ impl Orchestrator {
             turn_tool_source: None,
             interaction_broker: None,
             surface_store,
-            interaction_broker: None,
         }
     }
 
@@ -483,15 +480,6 @@ impl Orchestrator {
     /// this to inspect rows without SQLite.
     pub fn with_surface_store(mut self, store: Arc<dyn assistant_storage::SurfaceStore>) -> Self {
         self.surface_store = store;
-        self
-    }
-
-    /// Let turns wait on interactions through `broker`.
-    pub fn with_interaction_broker(
-        mut self,
-        broker: Arc<crate::interaction::InteractionBroker>,
-    ) -> Self {
-        self.interaction_broker = Some(broker);
         self
     }
 
@@ -512,8 +500,8 @@ impl Orchestrator {
         self
     }
 
-    /// Offer the `ask-user` tool to interactive web turns, answered through
-    /// `broker`.
+    /// Let turns ask their owner (`ask-user`) and wait on `surface_action`
+    /// interactions through `broker`.
     pub fn with_interaction_broker(
         mut self,
         broker: Arc<crate::interaction::InteractionBroker>,

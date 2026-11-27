@@ -42,16 +42,13 @@ import 'components/thread_empty_state.dart';
 import 'components/thread_error_banner.dart';
 import 'components/thread_viewport.dart';
 import 'components/timeline_entry_shell.dart';
+import 'components/timeline_entry_view.dart';
 import 'components/tool_call_body.dart';
 import 'components/tool_result_renderer_scope.dart';
 import 'components/tool_status_icon.dart';
 import 'components/turn_progress_card.dart';
 import 'components/typing_indicator.dart';
 import 'components/unknown_interaction_card.dart';
-
-// import 'components/timeline_entry_shell.dart'; // slot: chat-element-library 5b
-
-// import 'components/timeline_entry_view.dart'; // slot: chat-element-library 7c
 
 // import 'components/unknown_interaction_card.dart'; // slot: tool-approval-prompts 13b
 
@@ -71,7 +68,6 @@ final List<WidgetbookComponent> kComponents = [
   // sourcesResultViewComponent, // slot: tool-result-renderers C4
   // terminalResultViewComponent, // slot: tool-result-renderers C4
   // timelineEntryShellComponent, // slot: chat-element-library 5b
-  // timelineEntryViewComponent, // slot: chat-element-library 7c
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   attachmentTrayComponent,
@@ -115,6 +111,7 @@ final List<WidgetbookComponent> kComponents = [
   threadErrorBannerComponent,
   threadViewportComponent,
   timelineEntryShellComponent,
+  timelineEntryViewComponent,
   toolCallBodyComponent,
   toolResultRendererScopeComponent,
   toolStatusIconComponent,

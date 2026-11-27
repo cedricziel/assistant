@@ -17,32 +17,38 @@ class ThreadErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: colorScheme.errorContainer,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AssistantUiSpacing.lg,
-          vertical: AssistantUiSpacing.sm,
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.warning_amber_outlined,
-              color: colorScheme.onErrorContainer,
-              size: 18,
-            ),
-            const SizedBox(width: AssistantUiSpacing.sm),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(color: colorScheme.onErrorContainer),
+    // A live region: assistive tech announces the error when it appears.
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Material(
+        color: colorScheme.errorContainer,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AssistantUiSpacing.lg,
+            vertical: AssistantUiSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.warning_amber_outlined,
+                color: colorScheme.onErrorContainer,
+                size: 18,
               ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close, size: 18),
-              onPressed: onDismiss,
-            ),
-          ],
+              const SizedBox(width: AssistantUiSpacing.sm),
+              Expanded(
+                child: Text(
+                  message,
+                  style: TextStyle(color: colorScheme.onErrorContainer),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                tooltip: 'Dismiss error',
+                onPressed: onDismiss,
+              ),
+            ],
+          ),
         ),
       ),
     );

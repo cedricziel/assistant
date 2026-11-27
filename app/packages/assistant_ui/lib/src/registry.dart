@@ -50,6 +50,7 @@ const List<String> kAssistantUiElements = [
   'ThreadErrorBanner',
   'ThreadViewport',
   'TimelineEntryShell',
+  'TimelineEntryView',
   'ToolCallBody',
   'ToolResultRendererScope',
   'ToolStatusIcon',
@@ -66,6 +67,5 @@ const List<String> kAssistantUiElements = [
   // 'SourcesResultView', // slot: tool-result-renderers C4
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'TimelineEntryShell', // slot: chat-element-library 5b
-  // 'TimelineEntryView', // slot: chat-element-library 7c
   // 'UnknownInteractionCard', // slot: tool-approval-prompts 13b
 ];
