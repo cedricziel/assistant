@@ -182,4 +182,40 @@ class InteractionRecord {
 
   /// False when the kind wants no timeline card. The turn still waits.
   final bool rendersCard;
+
+  /// Whether the turn is still waiting on this interaction.
+  bool get isOpen =>
+      status == InteractionStatus.pending ||
+      status == InteractionStatus.submitting;
+
+  /// A copy with the lifecycle fields replaced. The request fields never
+  /// change after the server sent them.
+  InteractionRecord copyWith({
+    InteractionStatus? status,
+    ApprovalDecision? decision,
+    DateTime? resolvedAt,
+    String? ruleId,
+    List<QuestionAnswer>? answers,
+    bool? declined,
+  }) => InteractionRecord(
+    id: id,
+    kind: kind,
+    status: status ?? this.status,
+    createdAt: createdAt,
+    expiresAt: expiresAt,
+    toolCallId: toolCallId,
+    toolName: toolName,
+    arguments: arguments,
+    argumentsTruncated: argumentsTruncated,
+    reason: reason,
+    options: options,
+    suggestedRule: suggestedRule,
+    decision: decision ?? this.decision,
+    resolvedAt: resolvedAt ?? this.resolvedAt,
+    ruleId: ruleId ?? this.ruleId,
+    questions: questions,
+    answers: answers ?? this.answers,
+    declined: declined ?? this.declined,
+    rendersCard: rendersCard,
+  );
 }

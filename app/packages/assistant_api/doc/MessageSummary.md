@@ -19,6 +19,7 @@ Name | Type | Description | Notes
 **replyBranch** | [**BranchInfo**](BranchInfo.md) | On a user message whose reply has no visible assistant row: the versions of that reply. | [optional] 
 **role** | **String** |  | 
 **skillName** | **String** | Name of the tool or skill that produced this result (present when `role == \"tool\"`). | [optional] 
+**timing** | [**MessageTimingSummary**](MessageTimingSummary.md) | How long the turn that produced this reply took. Present only on the final assistant message of a turn, omitted when none was recorded. | [optional] 
 **toolCalls** | [**BuiltList&lt;ToolCallSummary&gt;**](ToolCallSummary.md) | Tool calls made in this message (present when `role == \"assistant\"` and the message contains tool invocations). | [optional] 
 **ttsAvailable** | **bool** | Whether text-to-speech audio can be synthesised for this message. `true` when a TTS provider is configured and the message is a non-empty assistant reply. | 
 **turn** | **int** |  | 

@@ -26,6 +26,7 @@ Future<void> _pump(
   bool showSkip = true,
   VoidCallback? onSkip,
   DateTime Function()? now,
+  String? awaitingLabel,
 }) => tester.pumpWidget(
   MaterialApp(
     home: Scaffold(
@@ -34,6 +35,7 @@ Future<void> _pump(
         showSkip: showSkip,
         onSkip: onSkip ?? () {},
         now: now ?? () => _now,
+        awaitingLabel: awaitingLabel,
       ),
     ),
   ),
@@ -160,6 +162,47 @@ void main() {
       await tester.pumpWidget(const SizedBox());
 
       await tester.pump(const Duration(seconds: 5));
+    });
+
+    group('awaitingLabel', () {
+      testWidgets('replaces the activity label', (tester) async {
+        await _pump(
+          tester,
+          status: _snap(TurnEventKind.toolResult, toolName: 'bash'),
+          awaitingLabel: 'Waiting for your approval',
+        );
+
+        expect(find.text('Waiting for your approval'), findsOneWidget);
+        expect(find.text('Calling bash…'), findsNothing);
+      });
+
+      testWidgets('hides the stall label and Skip after long silence', (
+        tester,
+      ) async {
+        await _pump(
+          tester,
+          status: _snap(
+            TurnEventKind.toolResult,
+            age: const Duration(minutes: 5),
+          ),
+          awaitingLabel: 'Waiting for your approval',
+        );
+
+        expect(find.text('Waiting for your approval'), findsOneWidget);
+        expect(find.textContaining('taking longer'), findsNothing);
+        expect(find.byKey(_skip), findsNothing);
+      });
+
+      testWidgets('the stall label returns once the label is cleared', (
+        tester,
+      ) async {
+        await _pump(
+          tester,
+          status: _snap(TurnEventKind.token, age: const Duration(seconds: 35)),
+        );
+
+        expect(find.textContaining('taking longer'), findsOneWidget);
+      });
     });
 
     group('Skip', () {

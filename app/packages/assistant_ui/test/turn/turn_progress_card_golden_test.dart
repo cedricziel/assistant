@@ -31,13 +31,25 @@ void main() {
     ),
   };
 
-  for (final entry in cases.entries) {
+  // Awaiting an approval: five minutes of silence, still no stall label.
+  final awaiting = _snap(
+    TurnEventKind.toolResult,
+    age: const Duration(minutes: 5),
+  );
+
+  for (final entry in {
+    ...cases,
+    'turn_progress_card_awaiting': awaiting,
+  }.entries) {
     for (final brightness in Brightness.values) {
       testWidgets('${entry.key} (${brightness.name})', (tester) async {
         await pumpGolden(
           tester,
           TurnProgressCard(
             status: entry.value,
+            awaitingLabel: entry.key == 'turn_progress_card_awaiting'
+                ? 'Waiting for your approval'
+                : null,
             onSkip: () {},
             now: () => kGoldenNow,
           ),

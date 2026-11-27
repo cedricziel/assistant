@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Conversations start untitled and are titled later by a background worker unless a caller sets an explicit title, which locks the title against further automatic changes.
+
+## Requirements
 
 ### Requirement: Conversations start with NULL title regardless of interface
 

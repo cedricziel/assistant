@@ -43,14 +43,15 @@ use crate::api::attachments::AttachmentMetaResponse;
 use crate::api::capabilities::{ServerCapabilities, UiCapabilities};
 use crate::api::conversations::{
     ConversationDetail, ConversationSearchSummary, ConversationSummary, CreateConversationRequest,
-    MessageFeedbackSummary, MessageSearchMatch, MessageSummary, SearchSegment, ToolCallSummary,
-    UpdateConversationRequest,
+    MessageFeedbackSummary, MessageSearchMatch, MessageSummary, MessageTimingSummary,
+    SearchSegment, ToolCallSummary, UpdateConversationRequest,
 };
 use crate::api::messages::{
     QuickMessageRequest, QuickMessageResponse, SendMessageRequest as ApiSendMessageRequest,
-    SseStatusEvent, SseSubagentCompletedEvent, SseSubagentStartedEvent, SseSubagentStatusEvent,
-    SseSubagentThinkingEvent, SseSubagentTokenEvent, SseSubagentToolResultEvent, SseSuggestion,
-    SseSuggestionsEvent, SseThinkingEvent, SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
+    SseDoneEvent, SseStatusEvent, SseSubagentCompletedEvent, SseSubagentStartedEvent,
+    SseSubagentStatusEvent, SseSubagentThinkingEvent, SseSubagentTokenEvent,
+    SseSubagentToolResultEvent, SseSuggestion, SseSuggestionsEvent, SseThinkingEvent,
+    SseTokenEvent, SseToolResultEvent, StreamRunEventsQuery,
 };
 use crate::api::push::{SubscribeRequest, UnsubscribeRequest, VapidKeyResponse};
 use crate::api::surfaces::SurfaceSummary;
@@ -513,6 +514,7 @@ pub struct ApiErrorResponse {
             StreamRunEventsQuery,
             ConversationDetail,
             MessageSummary,
+            MessageTimingSummary,
             crate::api::branches::BranchInfo,
             crate::api::branches::SwitchBranchRequest,
             crate::api::branch_turns::EditMessageRequest,
@@ -572,6 +574,7 @@ pub struct ApiErrorResponse {
             UnsubscribeRequest,
             // SSE event payload schemas
             SseTokenEvent,
+            SseDoneEvent,
             SseThinkingEvent,
             SseStatusEvent,
             SseToolResultEvent,
@@ -947,6 +950,27 @@ mod tests {
         assert!(
             replay.contains("suggestions"),
             "replay description: {replay}"
+        );
+    }
+
+    /// The `done` frame and history timing are typed schemas, so generated
+    /// clients decode them instead of an untyped map.
+    #[test]
+    fn done_frame_and_message_timing_are_documented() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec serialises");
+        let schemas = &spec["components"]["schemas"];
+        let done = &schemas["SseDoneEvent"];
+        assert!(done["properties"]["timing"].is_object(), "got: {done}");
+        let timing = &schemas["MessageTimingSummary"];
+        let required = timing["required"].as_array().expect("required list");
+        assert_eq!(
+            required,
+            &[serde_json::json!("total_ms")],
+            "only total_ms is required"
+        );
+        assert!(
+            schemas["MessageSummary"]["properties"]["timing"].is_object(),
+            "history rows document timing"
         );
     }
 

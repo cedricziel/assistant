@@ -95,6 +95,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(MessageFeedbackSummary.serializer)
       ..add(MessageSearchMatch.serializer)
       ..add(MessageSummary.serializer)
+      ..add(MessageTimingSummary.serializer)
       ..add(ModelPart.serializer)
       ..add(MutualTlsSecurityScheme.serializer)
       ..add(OAuth2SecurityScheme.serializer)
@@ -152,6 +153,7 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..add(SpaceAccessMode.serializer)
       ..add(SpaceDetail.serializer)
       ..add(SpaceSummary.serializer)
+      ..add(SseDoneEvent.serializer)
       ..add(SseInteractionRequestedEvent.serializer)
       ..add(SseInteractionResolvedEvent.serializer)
       ..add(SseStatusEvent.serializer)
@@ -285,6 +287,9 @@ Serializers _$serializers = (Serializers().toBuilder()
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(SseSuggestion)]),
           () => ListBuilder<SseSuggestion>())
+      ..addBuilderFactory(
+          const FullType(BuiltList, const [const FullType(String)]),
+          () => ListBuilder<String>())
       ..addBuilderFactory(
           const FullType(BuiltList, const [const FullType(String)]),
           () => ListBuilder<String>())
