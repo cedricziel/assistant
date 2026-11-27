@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use assistant_storage::{InteractionRow, InteractionStatus, RuleEffect};
 
@@ -19,6 +19,10 @@ pub const MAX_ANSWER_CHARS: usize = 4000;
 
 /// Cap on the serialized `arguments` of a tool-approval request (D10).
 pub const MAX_ARGUMENTS_BYTES: usize = 16 * 1024;
+
+/// Cap on the serialized `action` plus `data_model` of a `surface_action`
+/// answer, matching the post-turn route.
+pub const MAX_SURFACE_ACTION_BYTES: usize = 64 * 1024;
 
 const TRUNCATION_MARKER: &str = "…[truncated]";
 
@@ -114,11 +118,12 @@ pub struct InteractionKinds {
 }
 
 impl InteractionKinds {
-    /// A registry with `tool_approval` and `question` registered.
+    /// A registry with `tool_approval`, `question` and `surface_action` registered.
     pub fn with_builtin() -> Self {
         let mut kinds = Self::default();
         kinds.register(Arc::new(ToolApprovalKind));
         kinds.register(Arc::new(QuestionKind));
+        kinds.register(Arc::new(SurfaceActionKind));
         kinds
     }
 
@@ -369,6 +374,94 @@ impl InteractionKindHandler for QuestionKind {
     }
 }
 
+// -- surface_action --
+
+/// An A2UI surface the turn waits on (`render-surface` with
+/// `wait_for_action`).
+///
+/// Request: `{surface_id, tool_call_id, title, actions, send_data_model}`,
+/// where `actions` are the action names the surface's Buttons declare.
+/// Response: `{action: {name, context?, ..}, data_model?}`, or
+/// `{declined: true}`. The surface itself is the card, so the kind renders
+/// none.
+pub struct SurfaceActionKind;
+
+impl SurfaceActionKind {
+    fn action_name(response: &Value) -> Option<&str> {
+        response["action"]["name"].as_str()
+    }
+}
+
+impl InteractionKindHandler for SurfaceActionKind {
+    fn kind(&self) -> &'static str {
+        "surface_action"
+    }
+
+    fn validate_response(&self, request: &Value, response: &Value) -> Result<(), String> {
+        if response["declined"] == Value::Bool(true) {
+            return Ok(());
+        }
+        if !response["action"].is_object() {
+            return Err("a surface answer needs an 'action' object".into());
+        }
+        let name = Self::action_name(response).ok_or("the action needs a 'name'")?;
+        let declared = request["actions"]
+            .as_array()
+            .is_some_and(|names| names.iter().any(|n| n.as_str() == Some(name)));
+        if !declared {
+            return Err(format!("the surface declares no action '{name}'"));
+        }
+        if response.get("data_model").is_some_and(|m| !m.is_object()) {
+            return Err("'data_model' must be an object".into());
+        }
+        if response.to_string().len() > MAX_SURFACE_ACTION_BYTES {
+            return Err(format!(
+                "the answer is larger than {MAX_SURFACE_ACTION_BYTES} bytes"
+            ));
+        }
+        Ok(())
+    }
+
+    fn observation(&self, request: &Value, outcome: &InteractionOutcome) -> String {
+        match outcome {
+            InteractionOutcome::Resolved { response, .. } if response["declined"] == true => {
+                "The user dismissed the form without submitting it.".into()
+            }
+            InteractionOutcome::Resolved { response, .. } => {
+                let mut answer = json!({"action": response["action"]});
+                if request["send_data_model"] == Value::Bool(true)
+                    && let (Some(model), Some(map)) =
+                        (response.get("data_model"), answer.as_object_mut())
+                {
+                    map.insert("data_model".into(), model.clone());
+                }
+                format!("The user submitted the form: {answer}")
+            }
+            InteractionOutcome::Expired => "The user has not answered yet. The surface stays \
+                open, and they can still answer it after this turn."
+                .into(),
+            InteractionOutcome::Cancelled => {
+                "The user moved on before answering, so nothing was submitted.".into()
+            }
+        }
+    }
+
+    fn push_copy(&self, request: &Value) -> PushCopy {
+        PushCopy {
+            title: "Your input is needed".into(),
+            body: request["title"].as_str().unwrap_or_default().to_owned(),
+        }
+    }
+
+    fn progress_label(&self) -> &'static str {
+        "Waiting for your input"
+    }
+
+    fn renders_card(&self) -> bool {
+        false
+    }
+}
+
 // -- Argument size cap --
 
 /// Cut `arguments` to at most [`MAX_ARGUMENTS_BYTES`] of serialized JSON by
@@ -597,6 +690,100 @@ mod tests {
         assert!(h.push_copy(&req).body.contains("Which branch?"));
         assert_eq!(h.progress_label(), "Waiting for your answer");
         assert!(h.renders_card());
+    }
+
+    // -- surface_action --
+
+    fn surface_request() -> Value {
+        json!({
+            "surface_id": "s-1",
+            "tool_call_id": "call-1",
+            "title": "Trip form",
+            "actions": ["submit_form", "cancel"],
+            "send_data_model": true,
+        })
+    }
+
+    #[test]
+    fn surface_action_is_a_builtin_kind() {
+        let kinds = InteractionKinds::with_builtin();
+        assert!(kinds.get("surface_action").is_some());
+    }
+
+    #[test]
+    fn surface_action_accepts_only_declared_actions() {
+        let kinds = InteractionKinds::with_builtin();
+        let req = surface_request();
+        let check = |response: Value| kinds.validate_response("surface_action", &req, &response);
+        assert_eq!(
+            check(json!({"action": {"name": "submit_form", "context": {"a": 1}}})),
+            Ok(())
+        );
+        assert_eq!(
+            check(json!({"action": {"name": "cancel"}, "data_model": {"x": 1}})),
+            Ok(())
+        );
+        assert_eq!(
+            check(json!({"declined": true})),
+            Ok(()),
+            "decline is allowed"
+        );
+        for (name, bad) in [
+            ("undeclared name", json!({"action": {"name": "nuke"}})),
+            ("no name", json!({"action": {"context": {}}})),
+            ("no action", json!({})),
+            ("action is not an object", json!({"action": "submit_form"})),
+            (
+                "data model is not an object",
+                json!({"action": {"name": "cancel"}, "data_model": [1]}),
+            ),
+            (
+                "oversized context",
+                json!({"action": {"name": "cancel", "context": {"k": "x".repeat(MAX_SURFACE_ACTION_BYTES)}}}),
+            ),
+        ] {
+            assert!(check(bad).is_err(), "{name} must be refused");
+        }
+    }
+
+    #[test]
+    fn surface_action_observation_tells_the_llm_what_happened() {
+        let h = SurfaceActionKind;
+        let req = surface_request();
+        let say = |o| h.observation(&req, &o);
+
+        let submitted = say(resolved(json!({
+            "action": {"name": "submit_form", "context": {"city": "Oslo"}},
+            "data_model": {"guests": 2},
+        })));
+        for needle in ["submit_form", "Oslo", "guests"] {
+            assert!(
+                submitted.contains(needle),
+                "'{needle}' missing: {submitted}"
+            );
+        }
+
+        let mut no_model = surface_request();
+        no_model["send_data_model"] = json!(false);
+        let hidden = h.observation(
+            &no_model,
+            &resolved(json!({"action": {"name": "cancel"}, "data_model": {"secret": 1}})),
+        );
+        assert!(!hidden.contains("secret"), "data model withheld: {hidden}");
+
+        assert!(say(resolved(json!({"declined": true}))).contains("dismissed"));
+        assert!(say(InteractionOutcome::Expired).contains("not answered yet"));
+        assert!(say(InteractionOutcome::Cancelled).contains("moved on"));
+    }
+
+    #[test]
+    fn surface_action_presentation() {
+        let h = SurfaceActionKind;
+        let copy = h.push_copy(&surface_request());
+        assert_eq!(copy.title, "Your input is needed");
+        assert!(copy.body.contains("Trip form"), "body: {}", copy.body);
+        assert_eq!(h.progress_label(), "Waiting for your input");
+        assert!(!h.renders_card(), "the surface is the card");
     }
 
     // -- registry --

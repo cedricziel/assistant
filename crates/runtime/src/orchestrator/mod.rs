@@ -404,6 +404,9 @@ pub struct Orchestrator {
     pub(crate) interaction_broker: Option<Arc<crate::interaction::InteractionBroker>>,
     /// Where `render-surface` results are persisted (see `surface_hook`).
     pub(crate) surface_store: Arc<dyn assistant_storage::SurfaceStore>,
+    /// Where a turn waits on a `surface_action` interaction. Without one, a
+    /// surface that asks to be waited on is shown and the turn goes on.
+    pub(crate) interaction_broker: Option<Arc<crate::interaction::InteractionBroker>>,
 }
 
 /// A [`TurnToolSource`] bound to the space this orchestrator runs.
@@ -472,6 +475,7 @@ impl Orchestrator {
             turn_tool_source: None,
             interaction_broker: None,
             surface_store,
+            interaction_broker: None,
         }
     }
 
@@ -479,6 +483,15 @@ impl Orchestrator {
     /// this to inspect rows without SQLite.
     pub fn with_surface_store(mut self, store: Arc<dyn assistant_storage::SurfaceStore>) -> Self {
         self.surface_store = store;
+        self
+    }
+
+    /// Let turns wait on interactions through `broker`.
+    pub fn with_interaction_broker(
+        mut self,
+        broker: Arc<crate::interaction::InteractionBroker>,
+    ) -> Self {
+        self.interaction_broker = Some(broker);
         self
     }
 
@@ -1387,6 +1400,8 @@ impl Orchestrator {
                                         turn: &mut surface_turn,
                                         anchor_message_id,
                                         call_index,
+                                        run_id: ctx.run_id,
+                                        user_id: ctx.user_id.clone(),
                                     }),
                                 )
                                 .await;
@@ -1823,6 +1838,8 @@ impl Orchestrator {
                                     turn: &mut surface_turn,
                                     anchor_message_id,
                                     call_index,
+                                    run_id: ctx.run_id,
+                                    user_id: ctx.user_id.clone(),
                                 }),
                             )
                             .await;

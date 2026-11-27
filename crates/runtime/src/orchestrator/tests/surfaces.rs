@@ -2,6 +2,7 @@
 //! a `SurfaceUpdate` event, and never leaks into the tool result.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{Interface, MessageRole, TurnIdentity};
@@ -11,7 +12,8 @@ use assistant_core::{
 };
 use assistant_llm_provider::ScriptedLlmProvider;
 use assistant_storage::{
-    ConversationStore, InMemorySurfaceStore, NewSurface, StorageLayer, SurfaceStatus, SurfaceStore,
+    ConversationStore, InMemoryInteractionStore, InMemorySurfaceStore, InteractionStatus,
+    InteractionStore, NewSurface, StorageLayer, SurfaceStatus, SurfaceStore,
     registry::SkillRegistry,
 };
 use assistant_tool_executor::ToolExecutor;
@@ -19,6 +21,7 @@ use assistant_tool_executor::builtins::RenderSurfaceHandler;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::interaction::{InteractionBroker, InteractionKinds, Responder};
 use crate::orchestrator::{Orchestrator, OrchestratorEvent};
 
 fn call(id: &str, params: Value) -> ToolCallItem {
@@ -42,6 +45,9 @@ fn answer() -> LlmResponse {
     LlmResponse::FinalAnswer("done".to_string(), LlmResponseMeta::default())
 }
 
+/// The turn's owner, who may answer its interactions.
+const OWNER: &str = "alice";
+
 fn surface(title: &str) -> Value {
     json!({
         "title": title,
@@ -55,10 +61,13 @@ fn surface(title: &str) -> Value {
 }
 
 struct Harness {
-    orch: Orchestrator,
+    orch: Arc<Orchestrator>,
     storage: Arc<StorageLayer>,
     surfaces: Arc<InMemorySurfaceStore>,
     conversation_id: Uuid,
+    /// Set by [`Harness::with_broker`].
+    broker: Option<Arc<InteractionBroker>>,
+    interactions: Arc<InMemoryInteractionStore>,
 }
 
 struct Surfaced {
@@ -77,8 +86,59 @@ struct Results {
     surfaced: Vec<Surfaced>,
 }
 
+impl Results {
+    fn from_events(events: Vec<OrchestratorEvent>) -> Self {
+        let mut results = Results {
+            tool: Vec::new(),
+            surfaced: Vec::new(),
+        };
+        for event in events {
+            match event {
+                OrchestratorEvent::ToolResult {
+                    status,
+                    result,
+                    data,
+                    ..
+                } => results
+                    .tool
+                    .push((status, result.unwrap_or_default(), data)),
+                OrchestratorEvent::SurfaceUpdate {
+                    surface_id,
+                    tool_call_id,
+                    anchor_message_id,
+                    anchor_call_index,
+                    title,
+                    status,
+                    messages,
+                    ..
+                } => results.surfaced.push(Surfaced {
+                    id: surface_id,
+                    tool_call_id,
+                    anchor_message_id,
+                    anchor_call_index,
+                    status,
+                    title,
+                    messages,
+                }),
+                _ => {}
+            }
+        }
+        results
+    }
+}
+
 impl Harness {
     async fn new(script: Vec<LlmResponse>) -> Self {
+        Self::build(script, None).await
+    }
+
+    /// A harness whose turns can wait on interactions. `timeout` is how long
+    /// the broker waits for an answer; `None` keeps its default.
+    async fn with_broker(script: Vec<LlmResponse>, timeout: Option<Duration>) -> Self {
+        Self::build(script, Some(timeout)).await
+    }
+
+    async fn build(script: Vec<LlmResponse>, broker: Option<Option<Duration>>) -> Self {
         let llm = Arc::new(ScriptedLlmProvider::new().with_canned_responses(script));
         let llm_dyn: Arc<dyn LlmProvider> = llm;
         let mut config = OrgConfig::default();
@@ -101,13 +161,31 @@ impl Harness {
         )));
         let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
         let surfaces = Arc::new(InMemorySurfaceStore::new());
-        let orch = Orchestrator::new(llm_dyn, storage.clone(), executor, registry, bus, &config)
-            .with_surface_store(surfaces.clone());
+        let interactions = Arc::new(InMemoryInteractionStore::new());
+        let mut orch =
+            Orchestrator::new(llm_dyn, storage.clone(), executor, registry, bus, &config)
+                .with_surface_store(surfaces.clone())
+                .with_interaction_store(interactions.clone());
+        let broker = broker.map(|timeout| {
+            let mut broker = InteractionBroker::new(
+                interactions.clone(),
+                Arc::new(InteractionKinds::with_builtin()),
+            );
+            if let Some(timeout) = timeout {
+                broker = broker.with_timeout(timeout);
+            }
+            Arc::new(broker)
+        });
+        if let Some(broker) = &broker {
+            orch = orch.with_interaction_broker(broker.clone());
+        }
         Self {
-            orch,
+            orch: Arc::new(orch),
             storage,
             surfaces,
             conversation_id: Uuid::new_v4(),
+            broker,
+            interactions,
         }
     }
 
@@ -164,42 +242,74 @@ impl Harness {
             )
             .await
             .unwrap();
-        let mut results = Results {
-            tool: Vec::new(),
-            surfaced: Vec::new(),
-        };
+        let mut events = Vec::new();
         while let Ok(event) = rx.try_recv() {
-            match event {
-                OrchestratorEvent::ToolResult {
-                    status,
-                    result,
-                    data,
-                    ..
-                } => results
-                    .tool
-                    .push((status, result.unwrap_or_default(), data)),
-                OrchestratorEvent::SurfaceUpdate {
-                    surface_id,
-                    tool_call_id,
-                    anchor_message_id,
-                    anchor_call_index,
-                    title,
-                    status,
-                    messages,
-                    ..
-                } => results.surfaced.push(Surfaced {
-                    id: surface_id,
-                    tool_call_id,
-                    anchor_message_id,
-                    anchor_call_index,
-                    status,
-                    title,
-                    messages,
-                }),
-                _ => {}
-            }
+            events.push(event);
         }
-        results
+        Results::from_events(events)
+    }
+
+    /// One interactive web turn that is owned by [`OWNER`] and may wait.
+    /// `on_request` runs when the turn announces its first interaction, with
+    /// the broker, the interaction id and the run id.
+    async fn waiting_turn<F, Fut>(&self, on_request: F) -> Vec<OrchestratorEvent>
+    where
+        F: FnOnce(Arc<InteractionBroker>, String, Uuid) -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let broker = self.broker.clone().expect("a harness with a broker");
+        let run_id = Uuid::new_v4();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<OrchestratorEvent>(256);
+        let orch = self.orch.clone();
+        let conversation_id = self.conversation_id;
+        let turn = tokio::spawn(async move {
+            orch.run_turn_with_tools_streaming(
+                "go",
+                conversation_id,
+                Interface::Web,
+                vec![],
+                None,
+                vec![],
+                tx,
+                vec![],
+                TurnIdentity {
+                    interactive: true,
+                    run_id: Some(run_id),
+                    user_id: Some(assistant_core::identity::UserId(OWNER.into())),
+                    ..TurnIdentity::default()
+                },
+            )
+            .await
+        });
+        let mut events = Vec::new();
+        let mut on_request = Some(on_request);
+        while let Some(event) = rx.recv().await {
+            if let OrchestratorEvent::InteractionRequested { interaction_id, .. } = &event
+                && let Some(act) = on_request.take()
+            {
+                act(broker.clone(), interaction_id.clone(), run_id).await;
+            }
+            events.push(event);
+        }
+        turn.await.unwrap().unwrap();
+        events
+    }
+
+    /// The owner answers `interaction_id` with `response`.
+    async fn answer(&self, broker: &InteractionBroker, id: &str, run: Uuid, response: Value) {
+        let conversation = self.conversation_id.to_string();
+        broker
+            .respond(
+                &Responder {
+                    user_id: OWNER,
+                    conversation_id: &conversation,
+                    run_id: &run.to_string(),
+                },
+                id,
+                response,
+            )
+            .await
+            .unwrap();
     }
 
     /// Ids of the persisted tool-call messages, oldest first.
@@ -454,4 +564,253 @@ async fn validation_failure_then_retry_anchors_only_the_retry() {
             .len(),
         1
     );
+}
+
+// -- wait_for_action: the surface_action interaction --
+
+/// A form with one Button declaring `submit_form`, asked to wait.
+fn form_call(id: &str) -> ToolCallItem {
+    let mut params = json!({
+        "title": "Trip form",
+        "fallback_text": "A form that asks for a city",
+        "components": [
+            {"id": "root", "component": "Column", "children": ["go"]},
+            {"id": "go", "component": "Button", "child": "label",
+             "action": {"event": {"name": "submit_form"}}},
+            {"id": "label", "component": "Text", "text": "Go"}
+        ],
+        "data_model": {"city": "Oslo"}
+    });
+    params["wait_for_action"] = json!(true);
+    call(id, params)
+}
+
+/// The turn's frames in order, as `label` strings, keeping only the ones a
+/// surface wait produces.
+fn trace(events: &[OrchestratorEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            OrchestratorEvent::SurfaceUpdate { status, .. } => Some(format!("surface:{status}")),
+            OrchestratorEvent::InteractionRequested { kind, .. } => {
+                Some(format!("requested:{kind}"))
+            }
+            OrchestratorEvent::InteractionResolved { outcome, .. } => {
+                Some(format!("resolved:{}", outcome.name()))
+            }
+            OrchestratorEvent::ToolResult { status, .. } => Some(format!("tool:{status}")),
+            _ => None,
+        })
+        .collect()
+}
+
+async fn the_only_surface(h: &Harness) -> assistant_storage::Surface {
+    let all = h
+        .surfaces
+        .list_for_conversation(h.conversation_id)
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 1, "one surface");
+    all.into_iter().next().unwrap()
+}
+
+#[tokio::test]
+async fn the_surface_is_announced_before_the_interaction_that_waits_on_it() {
+    let h = Harness::with_broker(vec![calls(vec![form_call("c1")]), answer()], None).await;
+    let h = &h;
+    let events = h
+        .waiting_turn(|broker, id, run| async move {
+            h.answer(&broker, &id, run, json!({"declined": true})).await;
+        })
+        .await;
+
+    assert_eq!(
+        &trace(&events)[..2],
+        ["surface:active", "requested:surface_action"]
+    );
+    let surface = the_only_surface(h).await;
+    let requested = events
+        .iter()
+        .find_map(|e| match e {
+            OrchestratorEvent::InteractionRequested {
+                request,
+                tool_call_id,
+                renders_card,
+                ..
+            } => Some((request.clone(), tool_call_id.clone(), *renders_card)),
+            _ => None,
+        })
+        .expect("requested");
+    assert_eq!(requested.0["surface_id"], surface.id.to_string());
+    assert_eq!(requested.0["actions"], json!(["submit_form"]));
+    assert_eq!(requested.1.as_deref(), Some("c1"));
+    assert!(!requested.2, "the surface is the card");
+}
+
+#[tokio::test]
+async fn a_submitted_action_becomes_the_observation_and_closes_the_surface() {
+    let h = Harness::with_broker(vec![calls(vec![form_call("c1")]), answer()], None).await;
+    let h = &h;
+    let events = h
+        .waiting_turn(|broker, id, run| async move {
+            let response = json!({
+                "action": {"name": "submit_form", "context": {"city": "Bergen"}},
+                "data_model": {"city": "Bergen"},
+            });
+            h.answer(&broker, &id, run, response).await;
+        })
+        .await;
+
+    assert_eq!(
+        trace(&events),
+        [
+            "surface:active",
+            "requested:surface_action",
+            "resolved:resolved",
+            "surface:submitted",
+            "tool:ok",
+        ]
+    );
+    let results = Results::from_events(events);
+    let observation = &results.tool[0].1;
+    for needle in ["submit_form", "Bergen"] {
+        assert!(observation.contains(needle), "{needle}: {observation}");
+    }
+    let status_frame = &results.surfaced[1];
+    assert_eq!(status_frame.id, results.surfaced[0].id);
+    assert!(status_frame.messages.is_empty(), "a status frame only");
+
+    let surface = the_only_surface(h).await;
+    assert_eq!(surface.status, SurfaceStatus::Submitted);
+    assert_eq!(surface.action.as_ref().unwrap()["name"], "submit_form");
+}
+
+#[tokio::test]
+async fn a_dismissed_form_stays_open() {
+    let h = Harness::with_broker(vec![calls(vec![form_call("c1")]), answer()], None).await;
+    let h = &h;
+    let events = h
+        .waiting_turn(|broker, id, run| async move {
+            h.answer(&broker, &id, run, json!({"declined": true})).await;
+        })
+        .await;
+
+    assert_eq!(
+        trace(&events),
+        [
+            "surface:active",
+            "requested:surface_action",
+            "resolved:resolved",
+            "tool:ok"
+        ]
+    );
+    let results = Results::from_events(events);
+    assert!(
+        results.tool[0].1.contains("dismissed"),
+        "{}",
+        results.tool[0].1
+    );
+    assert_eq!(the_only_surface(h).await.status, SurfaceStatus::Active);
+}
+
+#[tokio::test]
+async fn an_unanswered_form_expires_and_stays_open() {
+    let h = Harness::with_broker(
+        vec![calls(vec![form_call("c1")]), answer()],
+        Some(Duration::from_millis(50)),
+    )
+    .await;
+    let h = &h;
+    let events = h.waiting_turn(|_, _, _| async {}).await;
+
+    assert_eq!(
+        trace(&events),
+        [
+            "surface:active",
+            "requested:surface_action",
+            "resolved:expired",
+            "tool:ok"
+        ]
+    );
+    let results = Results::from_events(events);
+    assert!(
+        results.tool[0].1.contains("not answered yet"),
+        "{}",
+        results.tool[0].1
+    );
+    assert_eq!(the_only_surface(h).await.status, SurfaceStatus::Active);
+}
+
+#[tokio::test]
+async fn a_cancelled_wait_stays_open() {
+    let h = Harness::with_broker(vec![calls(vec![form_call("c1")]), answer()], None).await;
+    let h = &h;
+    let events = h
+        .waiting_turn(|broker, _, run| async move {
+            // What ends a turn, and what a branch does to a pending interaction.
+            broker.abandon_run(&run.to_string()).await.unwrap();
+        })
+        .await;
+
+    assert_eq!(
+        trace(&events),
+        [
+            "surface:active",
+            "requested:surface_action",
+            "resolved:cancelled",
+            "tool:ok"
+        ]
+    );
+    let results = Results::from_events(events);
+    assert!(
+        results.tool[0].1.contains("moved on"),
+        "{}",
+        results.tool[0].1
+    );
+    assert_eq!(the_only_surface(h).await.status, SurfaceStatus::Active);
+    let pending = h
+        .interactions
+        .list_for_conversation(
+            &h.conversation_id.to_string(),
+            Some(InteractionStatus::Pending),
+        )
+        .await
+        .unwrap();
+    assert!(pending.is_empty());
+}
+
+#[tokio::test]
+async fn losing_the_race_to_a_post_turn_submit_says_so() {
+    let h = Harness::with_broker(vec![calls(vec![form_call("c1")]), answer()], None).await;
+    let h = &h;
+    let events = h
+        .waiting_turn(|broker, id, run| async move {
+            // The surface is submitted another way before this answer lands.
+            let stored = the_only_surface(h).await;
+            h.surfaces
+                .mark_submitted(stored.id, &json!({"name": "submit_form"}), Uuid::new_v4())
+                .await
+                .unwrap();
+            let response = json!({"action": {"name": "submit_form"}});
+            h.answer(&broker, &id, run, response).await;
+        })
+        .await;
+
+    let results = Results::from_events(events);
+    assert_eq!(results.surfaced.len(), 1, "no status frame for the loser");
+    let observation = &results.tool[0].1;
+    assert!(
+        observation.contains("already submitted in a new message"),
+        "{observation}"
+    );
+}
+
+#[tokio::test]
+async fn without_a_broker_the_surface_is_shown_and_the_turn_does_not_wait() {
+    let h = Harness::new(vec![calls(vec![form_call("c1")]), answer()]).await;
+    let r = h.turn().await;
+
+    assert_eq!(r.tool[0].0, "ok");
+    assert_eq!(r.surfaced.len(), 1);
+    assert!(r.tool[0].1.contains(&r.surfaced[0].id), "{}", r.tool[0].1);
 }

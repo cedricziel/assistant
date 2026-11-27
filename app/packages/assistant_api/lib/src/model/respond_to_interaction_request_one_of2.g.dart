@@ -7,8 +7,8 @@ part of 'respond_to_interaction_request_one_of2.dart';
 // **************************************************************************
 
 const RespondToInteractionRequestOneOf2KindEnum
-    _$respondToInteractionRequestOneOf2KindEnum_decline =
-    const RespondToInteractionRequestOneOf2KindEnum._('decline');
+    _$respondToInteractionRequestOneOf2KindEnum_surfaceAction =
+    const RespondToInteractionRequestOneOf2KindEnum._('surfaceAction');
 const RespondToInteractionRequestOneOf2KindEnum
     _$respondToInteractionRequestOneOf2KindEnum_unknownDefaultOpenApi =
     const RespondToInteractionRequestOneOf2KindEnum._('unknownDefaultOpenApi');
@@ -16,8 +16,8 @@ const RespondToInteractionRequestOneOf2KindEnum
 RespondToInteractionRequestOneOf2KindEnum
     _$respondToInteractionRequestOneOf2KindEnumValueOf(String name) {
   switch (name) {
-    case 'decline':
-      return _$respondToInteractionRequestOneOf2KindEnum_decline;
+    case 'surfaceAction':
+      return _$respondToInteractionRequestOneOf2KindEnum_surfaceAction;
     case 'unknownDefaultOpenApi':
       return _$respondToInteractionRequestOneOf2KindEnum_unknownDefaultOpenApi;
     default:
@@ -28,7 +28,7 @@ RespondToInteractionRequestOneOf2KindEnum
 final BuiltSet<RespondToInteractionRequestOneOf2KindEnum>
     _$respondToInteractionRequestOneOf2KindEnumValues = BuiltSet<
         RespondToInteractionRequestOneOf2KindEnum>(const <RespondToInteractionRequestOneOf2KindEnum>[
-  _$respondToInteractionRequestOneOf2KindEnum_decline,
+  _$respondToInteractionRequestOneOf2KindEnum_surfaceAction,
   _$respondToInteractionRequestOneOf2KindEnum_unknownDefaultOpenApi,
 ]);
 
@@ -39,11 +39,11 @@ Serializer<RespondToInteractionRequestOneOf2KindEnum>
 class _$RespondToInteractionRequestOneOf2KindEnumSerializer
     implements PrimitiveSerializer<RespondToInteractionRequestOneOf2KindEnum> {
   static const Map<String, Object> _toWire = const <String, Object>{
-    'decline': 'decline',
+    'surfaceAction': 'surface_action',
     'unknownDefaultOpenApi': 'unknown_default_open_api',
   };
   static const Map<Object, String> _fromWire = const <Object, String>{
-    'decline': 'decline',
+    'surface_action': 'surfaceAction',
     'unknown_default_open_api': 'unknownDefaultOpenApi',
   };
 
@@ -71,13 +71,19 @@ class _$RespondToInteractionRequestOneOf2KindEnumSerializer
 class _$RespondToInteractionRequestOneOf2
     extends RespondToInteractionRequestOneOf2 {
   @override
+  final JsonObject action;
+  @override
+  final JsonObject? dataModel;
+  @override
   final RespondToInteractionRequestOneOf2KindEnum kind;
 
   factory _$RespondToInteractionRequestOneOf2(
           [void Function(RespondToInteractionRequestOneOf2Builder)? updates]) =>
       (RespondToInteractionRequestOneOf2Builder()..update(updates))._build();
 
-  _$RespondToInteractionRequestOneOf2._({required this.kind}) : super._();
+  _$RespondToInteractionRequestOneOf2._(
+      {required this.action, this.dataModel, required this.kind})
+      : super._();
   @override
   RespondToInteractionRequestOneOf2 rebuild(
           void Function(RespondToInteractionRequestOneOf2Builder) updates) =>
@@ -90,12 +96,17 @@ class _$RespondToInteractionRequestOneOf2
   @override
   bool operator ==(Object other) {
     if (identical(other, this)) return true;
-    return other is RespondToInteractionRequestOneOf2 && kind == other.kind;
+    return other is RespondToInteractionRequestOneOf2 &&
+        action == other.action &&
+        dataModel == other.dataModel &&
+        kind == other.kind;
   }
 
   @override
   int get hashCode {
     var _$hash = 0;
+    _$hash = $jc(_$hash, action.hashCode);
+    _$hash = $jc(_$hash, dataModel.hashCode);
     _$hash = $jc(_$hash, kind.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
@@ -104,6 +115,8 @@ class _$RespondToInteractionRequestOneOf2
   @override
   String toString() {
     return (newBuiltValueToStringHelper(r'RespondToInteractionRequestOneOf2')
+          ..add('action', action)
+          ..add('dataModel', dataModel)
           ..add('kind', kind))
         .toString();
   }
@@ -114,6 +127,14 @@ class RespondToInteractionRequestOneOf2Builder
         Builder<RespondToInteractionRequestOneOf2,
             RespondToInteractionRequestOneOf2Builder> {
   _$RespondToInteractionRequestOneOf2? _$v;
+
+  JsonObject? _action;
+  JsonObject? get action => _$this._action;
+  set action(JsonObject? action) => _$this._action = action;
+
+  JsonObject? _dataModel;
+  JsonObject? get dataModel => _$this._dataModel;
+  set dataModel(JsonObject? dataModel) => _$this._dataModel = dataModel;
 
   RespondToInteractionRequestOneOf2KindEnum? _kind;
   RespondToInteractionRequestOneOf2KindEnum? get kind => _$this._kind;
@@ -127,6 +148,8 @@ class RespondToInteractionRequestOneOf2Builder
   RespondToInteractionRequestOneOf2Builder get _$this {
     final $v = _$v;
     if ($v != null) {
+      _action = $v.action;
+      _dataModel = $v.dataModel;
       _kind = $v.kind;
       _$v = null;
     }
@@ -150,6 +173,9 @@ class RespondToInteractionRequestOneOf2Builder
   _$RespondToInteractionRequestOneOf2 _build() {
     final _$result = _$v ??
         _$RespondToInteractionRequestOneOf2._(
+          action: BuiltValueNullFieldError.checkNotNull(
+              action, r'RespondToInteractionRequestOneOf2', 'action'),
+          dataModel: dataModel,
           kind: BuiltValueNullFieldError.checkNotNull(
               kind, r'RespondToInteractionRequestOneOf2', 'kind'),
         );

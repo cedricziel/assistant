@@ -160,6 +160,7 @@ export 'package:assistant_api/src/model/respond_to_interaction_request.dart';
 export 'package:assistant_api/src/model/respond_to_interaction_request_one_of.dart';
 export 'package:assistant_api/src/model/respond_to_interaction_request_one_of1.dart';
 export 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.dart';
+export 'package:assistant_api/src/model/respond_to_interaction_request_one_of3.dart';
 export 'package:assistant_api/src/model/role.dart';
 export 'package:assistant_api/src/model/rotate_secret_response.dart';
 export 'package:assistant_api/src/model/rule_scope.dart';

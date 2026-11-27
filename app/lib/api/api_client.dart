@@ -634,10 +634,11 @@ class ApiClient {
 }
 
 typedef _RespondOneOf =
-    OneOf3<
+    OneOf4<
       RespondToInteractionRequestOneOf,
       RespondToInteractionRequestOneOf1,
-      RespondToInteractionRequestOneOf2
+      RespondToInteractionRequestOneOf2,
+      RespondToInteractionRequestOneOf3
     >;
 
 /// Builds the generated respond-route body for [answer].
@@ -674,9 +675,9 @@ RespondToInteractionRequest _respondRequest(InteractionAnswer answer) =>
           ),
         ),
         DeclineAnswer() => _RespondOneOf(
-          typeIndex: 2,
-          value: RespondToInteractionRequestOneOf2(
-            (r) => r.kind = RespondToInteractionRequestOneOf2KindEnum.decline,
+          typeIndex: 3,
+          value: RespondToInteractionRequestOneOf3(
+            (r) => r.kind = RespondToInteractionRequestOneOf3KindEnum.decline,
           ),
         ),
       },

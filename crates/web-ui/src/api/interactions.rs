@@ -87,6 +87,18 @@ pub enum RespondToInteractionRequest {
     ToolApproval { decision: ToolDecision },
     /// Answers a `question` interaction.
     Question { answers: Vec<QuestionAnswer> },
+    /// Answers a `surface_action` interaction with an A2UI action the surface
+    /// declares, and optionally the surface's data model.
+    SurfaceAction {
+        /// The action object: `name` (a Button action the surface declares),
+        /// plus `sourceComponentId` and `context` when the client has them.
+        #[schema(value_type = Object)]
+        action: Value,
+        /// The surface's data model at the time of the action.
+        #[serde(default)]
+        #[schema(value_type = Option<Object>)]
+        data_model: Option<Value>,
+    },
     /// "I won't answer", for any kind. For an approval this means reject once.
     Decline,
 }
@@ -98,6 +110,7 @@ impl RespondToInteractionRequest {
         match self {
             Self::ToolApproval { .. } => Some("tool_approval"),
             Self::Question { .. } => Some("question"),
+            Self::SurfaceAction { .. } => Some("surface_action"),
             Self::Decline => None,
         }
     }
@@ -121,6 +134,13 @@ impl RespondToInteractionRequest {
                     })
                     .collect();
                 json!({"answers": answers})
+            }
+            Self::SurfaceAction { action, data_model } => {
+                let mut answer = json!({"action": action});
+                if let (Some(model), Some(map)) = (data_model, answer.as_object_mut()) {
+                    map.insert("data_model".into(), model);
+                }
+                answer
             }
             Self::Decline if interaction_kind == "tool_approval" => {
                 json!({"decision": ToolDecision::RejectOnce.as_str()})
@@ -161,7 +181,7 @@ pub struct InteractionDetail {
     pub conversation_id: String,
     /// The run (turn) that asked.
     pub run_id: String,
-    /// `tool_approval`, `question`, or a kind a newer server added.
+    /// `tool_approval`, `question`, `surface_action`, or a kind a newer server added.
     pub kind: String,
     pub status: InteractionStatusView,
     /// Whether the kind renders a card in the timeline.
@@ -228,7 +248,7 @@ impl From<InteractionStatusView> for InteractionStatus {
 #[derive(Serialize, ToSchema)]
 pub struct SseInteractionRequestedEvent {
     pub interaction_id: String,
-    /// `tool_approval`, `question`, or a kind a newer server added.
+    /// `tool_approval`, `question`, `surface_action`, or a kind a newer server added.
     pub kind: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
@@ -731,6 +751,86 @@ mod tests {
         let (status, body) = f.post(&question, json!({"kind": "decline"})).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["response"], json!({"declined": true}));
+    }
+
+    // -- surface_action --
+
+    fn surface_request() -> Value {
+        json!({
+            "surface_id": "6b1d5a52-6a47-4d7d-8a0e-3c3d4f3f6a10",
+            "title": "Trip form",
+            "actions": ["submit_form"],
+            "send_data_model": true,
+        })
+    }
+
+    #[tokio::test]
+    async fn owner_answers_a_surface_action() {
+        let f = fx().await;
+        let id = f.seed("surface_action", surface_request()).await;
+        let action = json!({"name": "submit_form", "context": {"city": "Oslo"}});
+
+        let (status, body) = f
+            .post(
+                &id,
+                json!({"kind": "surface_action", "action": action, "data_model": {"city": "Oslo"}}),
+            )
+            .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["kind"], "surface_action");
+        assert_eq!(body["status"], "resolved");
+        assert_eq!(body["renders_card"], false, "the surface is the card");
+        assert_eq!(
+            body["response"],
+            json!({"action": action, "data_model": {"city": "Oslo"}})
+        );
+        assert_eq!(f.status(&id).await, InteractionStatus::Resolved);
+    }
+
+    #[tokio::test]
+    async fn a_surface_can_be_dismissed_with_decline() {
+        let f = fx().await;
+        let id = f.seed("surface_action", surface_request()).await;
+        let (status, body) = f.post(&id, json!({"kind": "decline"})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["response"], json!({"declined": true}));
+    }
+
+    #[tokio::test]
+    async fn surface_answers_that_do_not_fit_are_refused() {
+        let f = fx().await;
+        let surface = f.seed("surface_action", surface_request()).await;
+        let approval = f.seed("tool_approval", approval_request()).await;
+        let cases = [
+            (
+                "undeclared action",
+                &surface,
+                json!({"kind": "surface_action", "action": {"name": "nuke"}}),
+            ),
+            (
+                "action without a name",
+                &surface,
+                json!({"kind": "surface_action", "action": {"context": {}}}),
+            ),
+            (
+                "surface_action body for a tool approval",
+                &approval,
+                json!({"kind": "surface_action", "action": {"name": "submit_form"}}),
+            ),
+            (
+                "tool approval body for a surface",
+                &surface,
+                json!({"kind": "tool_approval", "decision": "allow_once"}),
+            ),
+        ];
+        for (name, id, body) in cases {
+            let (status, resp) = f.post(id, body).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{name}: {resp}");
+            assert_error_body(&resp);
+        }
+        assert_eq!(f.status(&surface).await, InteractionStatus::Pending);
+        assert_eq!(f.status(&approval).await, InteractionStatus::Pending);
     }
 
     // -- 400 --

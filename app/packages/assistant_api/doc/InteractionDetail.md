@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **createdAt** | [**DateTime**](DateTime.md) |  | 
 **expiresAt** | [**DateTime**](DateTime.md) |  | 
 **interactionId** | **String** |  | 
-**kind** | **String** | `tool_approval`, `question`, or a kind a newer server added. | 
+**kind** | **String** | `tool_approval`, `question`, `surface_action`, or a kind a newer server added. | 
 **rendersCard** | **bool** | Whether the kind renders a card in the timeline. | 
 **request** | [**JsonObject**](.md) | The kind-specific request (for `tool_approval`: `tool_name`, `arguments`, `arguments_truncated`, `reason`, `options`, `suggested_rule`; for `question`: `questions`). | 
 **resolvedAt** | [**DateTime**](DateTime.md) |  | [optional] 
