@@ -85,6 +85,28 @@ Future<String?> getCurrentPushEndpoint() async {
   return null;
 }
 
+/// Drop the browser's PushManager subscription.
+///
+/// Returns `true` when a subscription was removed. Callers remove the server
+/// row separately, before the session is revoked.
+Future<bool> unsubscribeFromWebPush() async {
+  if (!_isSecureContext()) return false;
+  var removed = false;
+  try {
+    final sw = web.window.navigator.serviceWorker;
+    final regs = await sw.getRegistrations().toDart;
+    for (final reg in regs.toDart) {
+      final sub = await reg.pushManager.getSubscription().toDart;
+      if (sub == null) continue;
+      final ok = (await sub.unsubscribe().toDart).toDart;
+      removed = removed || ok;
+    }
+  } catch (e) {
+    debugPrint('[web_push] unsubscribeFromWebPush failed: $e');
+  }
+  return removed;
+}
+
 // -- Helpers -----------------------------------------------------------------
 
 /// Typed numeric indexing for [JSUint8Array].
