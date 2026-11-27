@@ -904,14 +904,27 @@ class ChatNotifier extends AsyncNotifier<ChatState>
         ),
       );
     }
+    // A nonzero-cursor replay never repeats `run_started` (it is stored at
+    // sequence 0), so restore the snapshot from `runId` before the loop. A
+    // retained approval needs it to submit.
+    final restoredStatus =
+        current.currentTurnStatus ??
+        TurnStatusSnapshot(
+          runId: runId,
+          lastEventKind: TurnEventKind.runStarted,
+          lastEventAt: DateTime.now(),
+          awaitingLabel: awaitingLabelOf(msgs),
+        );
     state = AsyncData(
       current.copyWith(
         messages: msgs,
         isSending: true,
         streamingContent: hasPlaceholder ? current.streamingContent : '',
         clearSuggestions: true,
+        currentTurnStatus: restoredStatus,
       ),
     );
+    _armStallTimer();
 
     try {
       await for (final event in _session.untilDetached(
@@ -923,22 +936,6 @@ class ChatNotifier extends AsyncNotifier<ChatState>
           _session.advance(event);
         } else if (event is RunStartedEvent) {
           _captureRunId(event);
-          // A dropped stream cleared the snapshot; restore it from the
-          // resumed run so a retained approval can still submit.
-          final resumed = state.value ?? const ChatState();
-          if (resumed.currentTurnStatus == null) {
-            state = AsyncData(
-              resumed.copyWith(
-                currentTurnStatus: TurnStatusSnapshot(
-                  runId: event.runId,
-                  lastEventKind: TurnEventKind.runStarted,
-                  lastEventAt: DateTime.now(),
-                  awaitingLabel: awaitingLabelOf(resumed.messages),
-                ),
-              ),
-            );
-            _armStallTimer();
-          }
         } else if (event is DoneEvent) {
           _session.advance(event);
           _finishTurn(

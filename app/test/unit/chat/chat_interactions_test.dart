@@ -683,15 +683,12 @@ void main() {
       unawaited(f.notifier.retryMessage(userMessage));
       await f.settle();
       expect(f.api.replays, hasLength(1), reason: 'one retry opens one replay');
-      final replay = f.api.replays.last;
-      await tester.runAsync(() async {
-        replay.add(const RunStartedEvent('run-1'));
-        await Future<void>.delayed(Duration.zero);
-        await Future<void>.delayed(Duration.zero);
-      });
-      await tester.pump();
 
-      expect(f.state.currentTurnStatus?.runId, 'run-1');
+      expect(
+        f.state.currentTurnStatus?.runId,
+        'run-1',
+        reason: 'restored from the cursor, without a run_started frame',
+      );
       expect(
         f.state.currentTurnStatus?.awaitingLabel,
         'Waiting for your approval',
@@ -708,7 +705,7 @@ void main() {
 
       // End the resumed turn so it cancels its stall timer.
       await tester.runAsync(() async {
-        replay.add(
+        f.api.replays.last.add(
           const DoneEvent(
             role: 'assistant',
             content: 'ok',
