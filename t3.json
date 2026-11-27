@@ -1,0 +1,11 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "scripts": [
+    {
+      "name": "Clean build artifacts",
+      "command": "rm -rf target app/build app/widgetbook/build app/packages/*/build app/.dart_tool app/widgetbook/.dart_tool",
+      "icon": "build",
+      "runOnSettle": true
+    }
+  ]
+}
