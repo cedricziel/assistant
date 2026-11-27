@@ -30,7 +30,7 @@ use p256::{
     PublicKey,
     ecdh::EphemeralSecret,
     ecdsa::{SigningKey, signature::Signer},
-    elliptic_curve::sec1::ToEncodedPoint,
+    elliptic_curve::{Generate as _, sec1::ToSec1Point},
     pkcs8::EncodePrivateKey,
 };
 use sha2::Sha256;
@@ -72,7 +72,7 @@ pub async fn ensure_vapid_keys(
 /// - The private key is PEM-encoded PKCS#8, then base64url-encoded
 /// - The public key is the raw uncompressed point (65 bytes), base64url-encoded
 pub(crate) fn generate_vapid_keypair() -> Result<(String, String)> {
-    let signing_key = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    let signing_key = SigningKey::try_generate().context("Failed to generate VAPID signing key")?;
     let verifying_key = signing_key.verifying_key();
 
     let pem = signing_key
@@ -80,7 +80,7 @@ pub(crate) fn generate_vapid_keypair() -> Result<(String, String)> {
         .context("Failed to encode VAPID private key to PEM")?;
     let priv_b64 = URL_SAFE_NO_PAD.encode(pem.as_bytes());
 
-    let point_bytes = verifying_key.to_encoded_point(false);
+    let point_bytes = verifying_key.to_sec1_point(false);
     let pub_b64 = URL_SAFE_NO_PAD.encode(point_bytes.as_bytes());
 
     Ok((priv_b64, pub_b64))
@@ -241,12 +241,8 @@ async fn send_one(
     let vapid_token = build_vapid_jwt(signing_key, endpoint)
         .map_err(|e| PushError::Other(e.context("VAPID JWT failed")))?;
 
-    let vapid_public_key = URL_SAFE_NO_PAD.encode(
-        signing_key
-            .verifying_key()
-            .to_encoded_point(false)
-            .as_bytes(),
-    );
+    let vapid_public_key =
+        URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_sec1_point(false).as_bytes());
 
     // POST to push endpoint.
     let resp = client
@@ -295,9 +291,10 @@ fn encrypt_payload(
         .context("Invalid receiver P-256 public key")?;
 
     // Generate an ephemeral sender key pair.
-    let sender_secret = EphemeralSecret::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    let sender_secret =
+        EphemeralSecret::try_generate().context("Failed to generate ephemeral sender key")?;
     let sender_pub = sender_secret.public_key();
-    let sender_pub_bytes = sender_pub.to_encoded_point(false).as_bytes().to_vec();
+    let sender_pub_bytes = sender_pub.to_sec1_point(false).as_bytes().to_vec();
 
     // ECDH shared secret.
     let shared_secret = sender_secret.diffie_hellman(&receiver_pub);
@@ -305,8 +302,7 @@ fn encrypt_payload(
 
     // Random 16-byte salt.
     let mut salt = [0u8; 16];
-    use p256::elliptic_curve::rand_core::RngCore as _;
-    p256::elliptic_curve::rand_core::OsRng.fill_bytes(&mut salt);
+    getrandom::fill(&mut salt).map_err(|e| anyhow::anyhow!("OS RNG failure: {e}"))?;
 
     // RFC 8291 §3.3 — derive PRK via HKDF-SHA-256 with the auth secret.
     // ikm = ECDH output, salt = auth_secret, info = "WebPush: info\0" || ua_pub || as_pub
@@ -511,10 +507,10 @@ mod tests {
         // Generate a fresh subscriber keypair; the public key is the
         // 65-byte uncompressed P-256 point.
         let subscriber_secret =
-            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+            p256::ecdsa::SigningKey::try_generate().expect("OS RNG should be available in tests");
         let subscriber_pub_bytes = subscriber_secret
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .to_vec();
         let auth_secret: [u8; 16] = [0xa5; 16];
@@ -540,10 +536,10 @@ mod tests {
     #[test]
     fn encrypt_payload_uses_different_salt_each_call() {
         let subscriber_secret =
-            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+            p256::ecdsa::SigningKey::try_generate().expect("OS RNG should be available in tests");
         let pub_bytes = subscriber_secret
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .to_vec();
         let auth: [u8; 16] = [0xff; 16];
