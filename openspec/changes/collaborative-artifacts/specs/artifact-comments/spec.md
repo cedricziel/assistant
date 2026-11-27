@@ -54,3 +54,25 @@ limited to 30 per artifact per hour; beyond that the API returns `429`.
 
 - **WHEN** the first summon creates the collaboration conversation
 - **THEN** it does not appear in `GET /api/conversations`
+
+### Requirement: The collaboration conversation inherits artifact access
+
+A collaboration conversation SHALL be owned by its artifact, not by a user. Every
+read of it or of its messages SHALL require the caller's space `Access::Read`
+**and** current `view` on the artifact, resolved through `ArtifactCtx`; when
+either is missing the response SHALL be `404`. Revoking a user's artifact access
+SHALL therefore remove the transcript at the same time as the artifact.
+
+#### Scenario: Revoked editor loses the transcript
+
+- **GIVEN** `u1` summoned the Persona on `a1` while holding `edit`
+- **WHEN** `u1`'s access to `a1` is removed and `u1` requests the collaboration
+  conversation or its messages
+- **THEN** the response is `404`
+
+#### Scenario: Reader keeps the thread they can see
+
+- **GIVEN** `u2` can `view` `a1` and a summon produced a collaboration
+  conversation
+- **WHEN** `u2` requests that conversation
+- **THEN** the response is `200` because the artifact grants `view`

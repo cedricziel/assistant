@@ -88,15 +88,24 @@ over model output. No tool SHALL grant access or create share links.
 
 `GET /api/artifacts/{id}/events` SHALL stream `snapshot`, `version_created`,
 `comment_created`, `comment_updated` and `deleted` events to anyone with `view`.
-When an artifact tool succeeds during a turn, the orchestrator SHALL emit an
+When a tool writes a new version during a turn (`artifact-create`,
+`artifact-update`, `artifact-edit` or a restore), the orchestrator SHALL emit an
 `artifact` event `{artifact_id, version, kind, title}` on the chat stream and
-persist it to the conversation event log.
+persist it to the conversation event log. Tools that only read — `artifact-read`
+and `artifact-list` — and `artifact-comment` SHALL emit no such event.
 
 #### Scenario: Viewer sees a new version
 
 - **GIVEN** a user has the events stream for `a1` open
 - **WHEN** the Persona creates version 4 in another conversation
 - **THEN** the stream delivers `version_created` with version 4
+
+#### Scenario: Reading is not a change
+
+- **GIVEN** a turn whose only artifact call is `artifact-read` on `a1`
+- **WHEN** the turn completes
+- **THEN** no `artifact` event is sent or persisted, and the chat shows no
+  artifact card
 
 ### Requirement: Artifacts are reachable over MCP and A2A
 

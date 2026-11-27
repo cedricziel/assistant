@@ -124,33 +124,45 @@ artifact (durable, shareable output) and that HTML must be self-contained.
 Rendered content is served at `GET /artifact-content/{id}/{version}` outside
 `/api`. An iframe cannot send an `Authorization` header, so access is granted by
 a short-lived signature: `POST /api/artifacts/{id}/render-url` (authenticated)
-returns a URL with `exp` (5 minutes) and an HMAC-SHA256 `sig` over
-`{id, version, exp}` keyed from `jwt_secret`. Public and org links resolve to the
-same route after token validation.
+returns a URL carrying `sub` (the viewer's user id), `exp` (2 minutes) and an
+HMAC-SHA256 `sig` over `{id, version, sub, exp}` keyed from `jwt_secret`. The
+content route resolves `sub`'s effective role (D5) again on every request, so a
+removed grant or a lost space role returns `404` on the next load instead of
+waiting for `exp`. Signed URLs are never issued for link views: share links call
+the same route with their token, and the route revalidates the token hash, the
+policy and the expiry per request exactly as `/a/{token}` does. Revoking a link
+or turning the policy off therefore takes effect immediately.
 
 Every response from this route sets:
 
 ```
-Content-Security-Policy: sandbox allow-scripts allow-popups
-    allow-popups-to-escape-sandbox allow-forms allow-modals;
+Content-Security-Policy: sandbox allow-scripts;
   default-src 'none';
   script-src 'unsafe-inline' <cdn allowlist>;
   style-src 'unsafe-inline' https://fonts.googleapis.com <cdn allowlist>;
   font-src https://fonts.gstatic.com data:;
   img-src data: blob:; media-src data: blob:;
-  connect-src 'none'; form-action 'none';
+  connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none';
   frame-ancestors <public url> <content origin>
 X-Content-Type-Options: nosniff
 Referrer-Policy: no-referrer
-Cache-Control: private, max-age=300
+Cache-Control: private, no-store
 ```
 
 The CSP `sandbox` directive (without `allow-same-origin`) gives the document an
 **opaque origin even when opened directly**, so its scripts cannot read the
 app's cookies or storage, and the browser does not attach credentials to
 requests it makes. That makes a single-hostname install safe without a second
-domain. `connect-src 'none'` stops exfiltration via fetch; `form-action 'none'`
-stops form posts.
+domain. `connect-src 'none'` stops fetch and XHR; `form-action 'none'` stops
+form posts; `base-uri 'none'` stops a `<base>` tag from redirecting relative
+URLs; `object-src 'none'` blocks embeds.
+
+No `allow-popups`, `allow-top-navigation`, `allow-forms` or `allow-modals`: a
+page cannot open windows, navigate the app, submit forms or raise `alert` /
+`confirm` dialogs, all of which are usable for phishing or for sending artifact
+text to an attacker URL. Links inside an artifact are inert in the frame; the
+injected bridge (D6) forwards a click to the app as `open-link`, and the app
+opens validated `http(s)` URLs outside the frame after a confirmation.
 
 `server.toml` gains:
 
@@ -166,13 +178,15 @@ requests whose `Host` is the main origin. An offline install sets
 
 What is rendered per kind:
 
-- `html` — served as-is (UTF-8).
+- `html` — served as UTF-8 with the bridge script (D6) injected at serve time;
+  the stored content is never rewritten.
 - `slides` — Markdown, optional YAML frontmatter (`theme: light|dark`,
   `aspect: 16:9|4:3`), slides separated by a line containing only `---`.
   Rendered with `pulldown-cmark` into an embedded deck template (vanilla JS,
-  arrow/space/Home/End navigation, `#n` deep links, `@media print` one slide
-  per page for PDF). Fenced `mermaid` blocks are left as `<pre class=mermaid>`
-  and rendered only if the CDN allowlist permits the mermaid script.
+  arrow/space/Home/End navigation, `#n` deep links, the same bridge script,
+  `@media print` one slide per page for PDF). Fenced `mermaid` blocks are left
+  as `<pre class=mermaid>` and rendered only if the CDN allowlist permits the
+  mermaid script.
 - `markdown`, `code`, `data` — rendered natively by Flutter; the content route
   serves them as HTML (markdown via `pulldown-cmark`, code/data in `<pre>`) only
   for share links, so link viewers without the app see something.
@@ -196,11 +210,21 @@ Grants are only to users of the same org. `public` links require
 `artifact_policy.allow_public_links`; disabling the policy makes existing public
 links return 404 without deleting them, so re-enabling restores them.
 
-Routes that address one artifact use a new `ArtifactCtx` extractor: it takes
-`X-Space-Id` when present and the user is a member, otherwise it looks up the
-artifact's space through `artifact_grants`. Non-visible artifacts return 404,
-never 403, to avoid confirming existence. `GET /api/artifacts/shared-with-me`
-lists grants across spaces.
+Routes that address one artifact use a new `ArtifactCtx` extractor. It resolves
+the artifact's space and the caller's role in this order, taking the first that
+applies:
+
+1. `X-Space-Id`, when the caller is a member of that space **or an org admin of
+   the org** — the same fallback `SpaceCtx` applies today.
+2. A row in `artifact_grants` for the caller.
+3. An `org` link token the caller presents (header `X-Artifact-Link` or
+   `?link=`), validated for this artifact and the caller's org, which also
+   supplies the link's role for this request only.
+
+Otherwise the response is `404`, never `403`, so an invisible artifact is not
+confirmed to exist. A link token has authority only when presented; nothing
+grants it implicitly. `GET /api/artifacts/shared-with-me` lists grants across
+spaces.
 
 ### D6. Comment anchors
 
@@ -208,9 +232,28 @@ lists grants across spaces.
 selector, up to 32 chars of context each side) plus the `version` it was made
 on. Clients re-anchor on newer versions by searching for prefix+quote+suffix,
 then quote alone; if not found the thread shows as "outdated" but stays open.
-For HTML and slides the quote is taken from the rendered text via a
-`postMessage` selection bridge in the deck/HTML wrapper — the only message the
-sandbox sends to its parent, and the parent validates `event.source`.
+
+For `html` and `slides` the quote is taken from the rendered text through a
+bridge script that the **server** adds to the response:
+
+- `slides` renders from the deck template, which contains the bridge.
+- `html` is served with a `<script>` element appended before `</body>` (or at
+  the end of the document when there is none) plus an anchor click listener on
+  the document. The stored version is not modified; the injection happens only
+  on this route, and frames that do not receive it — an artifact fetched
+  directly from the API — cannot be commented on.
+
+The bridge sends two message kinds to the parent, and nothing else:
+
+- `{type: "selection", text, quote, prefix, suffix}` when the user selects text
+  while the comment sidebar is open.
+- `{type: "open-link", href}` when the user clicks a link inside the frame.
+
+The parent accepts a message only when `event.source` is the frame's
+`contentWindow` and `event.origin` is `"null"` (the opaque origin), and opens an
+`open-link` target only for `http`/`https` after the user confirms. Because the
+parent cannot read the frame's selection (opaque origin), the quote in the first
+message is the only source for anchors on these kinds.
 
 ### D7. Summoning the Persona
 
@@ -218,12 +261,19 @@ A user with `edit` posts a comment containing `@<persona-slug>` or presses
 "Ask <Persona>". The server publishes `artifact.summon` on the space's scoped
 bus with `{artifact_id, thread_id, user_id}`. The space runtime starts a turn
 in the artifact's `collab_conversation_id` (created on first summon, owned by
-the artifact, hidden from the conversation list) **as the summoning user**. The
-turn's first message contains the thread, the anchor, and the latest version
-number; the Persona reads, edits with `artifact-edit`, and replies with
-`artifact-comment`. Replies record `author_kind = persona`,
+the artifact rather than by any user, hidden from the conversation list) **as
+the summoning user**. The turn's first message contains the thread, the anchor,
+and the latest version number; the Persona reads, edits with `artifact-edit`,
+and replies with `artifact-comment`. Replies record `author_kind = persona`,
 `on_behalf_of = user`. Summons are rate-limited to 30 per artifact per hour;
 the 31st returns 429.
+
+Because the conversation holds the latest version and every summon thread, a
+direct read of it (`GET /api/conversations/{id}` and its messages) requires the
+space's `Access::Read` **and** current `view` on the artifact, resolved through
+`ArtifactCtx`. Revoking a user's artifact access therefore removes the
+transcript at the same time as the artifact, and the first summoner is recorded
+as the turn's user, never as the conversation's owner.
 
 ### D8. Live updates and chat integration
 
@@ -231,8 +281,11 @@ the 31st returns 429.
   `version_created`, `comment_created`, `comment_updated`, `deleted`. Backed by
   an `ArtifactBroadcast` like `ConversationBroadcast`.
 - The orchestrator emits `OrchestratorEvent::ArtifactChanged {artifact_id,
-version, kind, title}` when an artifact tool succeeds. It is persisted to
-  `conversation_events` and sent on the chat SSE stream as `event: artifact`.
+version, kind, title}` only when a tool writes a new version —
+  `artifact-create`, `artifact-update`, `artifact-edit` or a restore.
+  `artifact-read`, `artifact-list` and `artifact-comment` emit nothing, since
+  nothing changed. The event is persisted to `conversation_events` and sent on
+  the chat SSE stream as `event: artifact`.
 - Messenger interfaces append one line per changed artifact to the turn's
   reply: `<title> (v<n>): <public_url>/artifacts/<id>`. The link opens the SPA,
   which requires sign-in and applies D5. If no public URL is configured, the
@@ -243,9 +296,8 @@ version, kind, title}` when an artifact tool succeeds. It is persisted to
 `app/lib/features/artifacts/` with MVVM per project conventions:
 
 - `ArtifactViewer` — native markdown/code/data; for `html`/`slides` an
-  `ArtifactFrame` that uses `HtmlElementView` + `<iframe sandbox="allow-scripts
-allow-popups allow-forms allow-modals">` on web and `webview_flutter` on
-  macOS/iOS, loading the signed render URL.
+  `ArtifactFrame` that uses `HtmlElementView` + `<iframe sandbox="allow-scripts">`
+  on web and `webview_flutter` on macOS/iOS, loading the signed render URL.
 - `ArtifactEditor` — source editor (monospace, line numbers) with save →
   `PUT .../content`; on 409 it shows a diff of the user's text vs latest and
   offers "Reapply on latest" or "Discard mine".
@@ -292,6 +344,18 @@ Shapes follow `openspec/config.yaml`: `ArtifactSummary`, `ArtifactDetail`,
   write hostile HTML. Mitigated by the opaque-origin sandbox, `connect-src
 'none'`, no credentials, and the public-link notice. Residual risk: phishing
   UI inside a shared page — public links are off by default.
+- **An artifact script can navigate its own frame away.** No CSP stops a page
+  from setting `location`, so a script can send text it already renders to an
+  attacker URL, and can carry its own render URL with it. Popups, top
+  navigation, forms and dialogs are blocked; a render URL grants one immutable
+  version, expires in 2 minutes and is rechecked against the viewer's role at
+  redemption, so a copied URL is not a durable credential. Content the page
+  already holds cannot be hidden from its own script — the boundary is that the
+  page gets nothing else.
+- **Revocation.** Role and link changes are rechecked per request, so there is
+  no post-revocation window for a viewer who reloads or refetches. A page
+  already rendered on screen keeps showing what it rendered; closing the frame
+  is the user's action.
 - **CDN dependency.** Allowlisted CDNs see viewer IPs. Operators can empty the
   allowlist.
 - **Opaque origin breaks `localStorage` in artifacts.** Acceptable; in-artifact

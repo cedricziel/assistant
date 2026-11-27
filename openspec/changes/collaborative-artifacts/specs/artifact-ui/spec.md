@@ -8,9 +8,9 @@ artifacts appear in chat and on messenger platforms.
 ### Requirement: The app renders every artifact kind
 
 The app SHALL render `markdown`, `code` and `data` natively, and `html` and
-`slides` in a sandboxed frame loading a signed render URL: an `<iframe>` with a
-`sandbox` attribute that omits `allow-same-origin` on web, and a webview on
-macOS and iOS. It SHALL show loading, error and empty states.
+`slides` in a sandboxed frame loading a signed render URL: an `<iframe>` whose
+`sandbox` attribute grants only `allow-scripts` on web, and a webview on macOS
+and iOS. It SHALL show loading, error and empty states.
 
 #### Scenario: Slides in the app
 

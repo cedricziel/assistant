@@ -13,7 +13,7 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 - [ ] 2.1 Failing tests for `artifact-create`, `artifact-read`, `artifact-update`, `artifact-list` using `InMemoryArtifactStore` (confirm RED); implement handlers in `crates/tool-executor/src/builtins/artifacts.rs`; GREEN
 - [ ] 2.2 Failing tests for `artifact-edit`: single match applies, zero or multiple matches error naming the entry, stale `base_version` errors with latest content (confirm RED); implement; GREEN
 - [ ] 2.3 Failing test: a turn run by a space `Viewer` cannot update (confirm RED); route tool authorization through a shared `ArtifactAccess::resolve` in `crates/core` (space-role part only for now); GREEN
-- [ ] 2.4 Register the tools in `register_builtins`; failing orchestrator test (with `ScriptedLlmProvider`) that a successful artifact tool emits `OrchestratorEvent::ArtifactChanged` and persists it to `conversation_events` (confirm RED); implement; GREEN
+- [ ] 2.4 Register the tools in `register_builtins`; failing orchestrator test (with `ScriptedLlmProvider`) that a successful artifact tool emits `OrchestratorEvent::ArtifactChanged` and persists it to `conversation_events`, and that `artifact-read` emits nothing (confirm RED); implement; GREEN
 - [ ] 2.5 Add the artifact guidance section to the system prompt; snapshot test
 
 ## 3. PR 3 — REST API and live stream
@@ -26,22 +26,23 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 
 ## 4. PR 4 — Sandbox and slides
 
-- [ ] 4.1 Failing tests for render-URL signing: valid, expired, tampered version, wrong artifact (confirm RED); implement HMAC over `{id, version, exp}` keyed from `jwt_secret`; GREEN
-- [ ] 4.2 Failing route tests for `GET /artifact-content/{id}/{version}`: 404 without signature, exact CSP header (sandbox without `allow-same-origin`, `connect-src 'none'`, `form-action 'none'`, allowlist), `nosniff`, `no-referrer` (confirm RED); implement; GREEN
+- [ ] 4.1 Failing tests for render-URL signing: valid, expired, tampered version, wrong artifact, and a viewer whose grant was removed between issue and redemption (confirm RED); implement HMAC over `{id, version, sub, exp}` (2 minutes) keyed from `jwt_secret`; GREEN
+- [ ] 4.2 Failing route tests for `GET /artifact-content/{id}/{version}`: 404 without signature, role re-resolved per request, link token revalidated per request (revoked link or disabled policy → 404 at once), exact CSP header (sandbox with `allow-scripts` only, `connect-src`/`form-action`/`base-uri`/`object-src` `'none'`), `nosniff`, `no-referrer`, `private, no-store` (confirm RED); implement; GREEN
 - [ ] 4.3 Failing tests for `[artifacts]` in `server.toml`: defaults, empty allowlist, `content_origin` makes main-origin requests 404 (confirm RED); implement config and host check; GREEN
-- [ ] 4.4 Failing tests for the slides renderer: frontmatter parsing, `---` splitting (not inside fenced code), three slides → three sections, print CSS present (confirm RED); implement with `pulldown-cmark` and an embedded template; GREEN
+- [ ] 4.4 Failing tests for the slides renderer: frontmatter parsing, `---` splitting (not inside fenced code), three slides → three sections, print CSS and bridge script present (confirm RED); implement with `pulldown-cmark` and an embedded template; GREEN
 - [ ] 4.5 Render `markdown`/`code`/`data` to HTML for link views; tests first
 - [ ] 4.6 Playwright test: an `html` artifact's `fetch('/api/...')` is blocked and `document.cookie` is empty inside the frame
-- [ ] 4.7 `make dump-openapi` for `POST /render-url`; `make generate-flutter-client`
+- [ ] 4.7 Failing tests for the injected bridge: a static `html` artifact gets the script before `</body>` (or at the end), stored versions are unchanged, and only `selection`/`open-link` messages are posted (confirm RED); implement the injection and anchor click listener; GREEN
+- [ ] 4.8 `make dump-openapi` for `POST /render-url`; `make generate-flutter-client`
 
 ## 5. PR 5 — Sharing
 
 - [ ] 5.1 Failing migration test for `migrations/org/010_artifact_shares.sql` (grants, links with unique `token_hash`, policy) (confirm RED); write it; GREEN
 - [ ] 5.2 Failing contract tests for `ArtifactShareStore` (Sqlite + InMemory): grant upsert/remove, link create stores only a hash, revoke, expiry, policy default off (confirm RED); implement; GREEN
 - [ ] 5.3 Failing unit tests for full `ArtifactAccess::resolve` covering the role matrix (space role × owner × grant × org link; 404 not 403) (confirm RED); implement; GREEN
-- [ ] 5.4 Failing tests for the `ArtifactCtx` extractor: member via `X-Space-Id`, grantee without membership, other org → 404 (confirm RED); implement and switch artifact routes and tools to it; GREEN
+- [ ] 5.4 Failing tests for the `ArtifactCtx` extractor: member via `X-Space-Id`, org admin without a membership, grantee without membership, org link token supplied per request, other org → 404 (confirm RED); implement and switch artifact routes and tools to it; GREEN
 - [ ] 5.5 Failing route tests for grants, links, `shared-with-me` and policy (only `manage` changes access; public link 403 when policy off; toggling policy hides and restores links) (confirm RED); implement; GREEN
-- [ ] 5.6 Failing tests for `GET /a/{token}`: pinned version, latest, revoked/expired → 404, org link needs same-org sign-in, public frame shows the notice (confirm RED); implement in `public_routes`; GREEN
+- [ ] 5.6 Failing tests for `GET /a/{token}`: pinned version, latest, revoked/expired → 404, org link needs same-org sign-in, disabled policy → 404 immediately, content route revalidates the token, public frame shows the notice (confirm RED); implement in `public_routes`; GREEN
 - [ ] 5.7 `make dump-openapi`; `make generate-flutter-client`
 
 ## 6. PR 6 — Comments and summons
@@ -50,7 +51,7 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 - [ ] 6.2 Failing tests for re-anchoring (prefix+quote+suffix, quote only, `outdated`) in `crates/core` (confirm RED); implement; GREEN
 - [ ] 6.3 Failing route tests for `GET/POST /comments`, `PATCH /comments/{cid}` and SSE `comment_*` events (confirm RED); implement; GREEN
 - [ ] 6.4 Failing tests for summons: `@slug` from an editor publishes `artifact.summon`, a commenter's mention does not, 31st summon in an hour → 429 (confirm RED); implement `POST /summon` and mention parsing; GREEN
-- [ ] 6.5 Failing runtime test: `artifact.summon` starts a turn as the summoning user in a hidden collaboration conversation, and the Persona's reply is stored with `author_kind = persona` (confirm RED); implement; GREEN
+- [ ] 6.5 Failing runtime test: `artifact.summon` starts a turn as the summoning user in a hidden collaboration conversation owned by the artifact, the Persona's reply is stored with `author_kind = persona`, and reading the conversation requires current artifact `view` (revoked editor → 404) (confirm RED); implement; GREEN
 - [ ] 6.6 Add the `artifact-comment` tool; tests first
 - [ ] 6.7 `make dump-openapi`; `make generate-flutter-client`
 
@@ -67,7 +68,7 @@ Each numbered section is one PR, in order. Rebase onto `main` before each.
 
 - [ ] 8.1 `ArtifactEditor` with save and the 409 conflict view; ViewModel unit tests (success, conflict, error) and widget tests
 - [ ] 8.2 Version picker with diff; widget tests
-- [ ] 8.3 Comment sidebar with anchored threads, `outdated` state and "Ask <Persona>"; selection bridge from the frame validated by `event.source`; tests
+- [ ] 8.3 Comment sidebar with anchored threads, `outdated` state and "Ask <Persona>"; selection bridge from the injected script validated by `event.source` and `event.origin == "null"`, plus `open-link` confirmation; tests
 - [ ] 8.4 Share dialog (grants, org/public links, pin, revoke) shown only for `manage`; tests
 - [ ] 8.5 Admin screen toggle for `allow_public_links`; tests
 - [ ] 8.6 Update Playwright baselines; note the visual diff in the PR

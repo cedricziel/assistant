@@ -11,8 +11,14 @@ Artifact roles SHALL be ordered `view < comment < edit < manage`. A user's
 effective role SHALL be the highest of: their space role (`Viewer→view`,
 `Member→edit`, `SpaceAdmin` or `OrgAdmin→manage`), `manage` if they own the
 artifact, their grant on the artifact, and the role of an `org` link presented
-with the request. A request for an artifact the user cannot `view` SHALL return
-`404`, not `403`.
+with the request. An org admin SHALL keep access to every space in their org
+without a membership, exactly as the space extractor allows today, and therefore
+holds `manage` on its artifacts. A request for an artifact the user cannot
+`view` SHALL return `404`, not `403`.
+
+An `org` link SHALL carry authority only while it is presented: `ArtifactCtx`
+SHALL accept `X-Artifact-Link` or `?link=` for the artifact it names, validate
+it for the caller's org, and use its role for that request alone.
 
 #### Scenario: Grant to a non-member
 
@@ -26,6 +32,20 @@ with the request. A request for an artifact the user cannot `view` SHALL return
 - **GIVEN** `u3` is a `Member` of the artifact's space
 - **WHEN** `u3` is granted `view`
 - **THEN** `u3` still has `edit`
+
+#### Scenario: Org admin without a membership
+
+- **GIVEN** `u4` is an org admin and not a member of space `eng`
+- **WHEN** `u4` sends `GET /api/artifacts/a1` with that space's `X-Space-Id`
+- **THEN** the response is `200` with `manage`
+
+#### Scenario: Org link to a non-member
+
+- **GIVEN** `u5` belongs to the artifact's org, is not a space member and holds
+  no grant
+- **WHEN** `u5` comments using an `org` link token that names `a1`
+- **THEN** the comment is accepted with the link's `comment` role
+- **AND** a request without that token returns `404`
 
 ### Requirement: Only manage may change access
 

@@ -69,6 +69,10 @@ These capabilities matter less for us, but they show the direction:
 
 ## Gaps in the April proposal
 
+The table records the analysis. Where its recommendation and the "Decisions
+taken" at the end disagree, the decisions win; rows marked _superseded_ say what
+this change deliberately does differently.
+
 | Topic        | April proposal                                            | Claude's model                          | Recommendation                                                                                                                                                                                                                             |
 | ------------ | --------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Scope        | Belongs to a conversation (`conversation_id NOT NULL`)    | Standalone object with a stable URL     | Make artifacts space-scoped in `space.db` and link them to the conversations and messages that touched them.                                                                                                                               |
@@ -76,24 +80,28 @@ These capabilities matter less for us, but they show the direction:
 | Editing      | Full content per version                                  | Republish with a stale-copy check       | Keep full content per version. Writes carry `base_version`; a stale write is rejected with the latest version so the Persona merges and retries. Add a targeted `artifact-edit` (find/replace) so small changes don't cost a full rewrite. |
 | Human edits  | Not supported                                             | Editors edit directly or through Claude | Add a Flutter editor for Markdown and code. A human save is a version like any other, under the same concurrency check.                                                                                                                    |
 | Comments     | None                                                      | Threads; Claude summoned by an editor   | Store threads per artifact, anchored to a version and an optional text range. An `@persona` mention starts an orchestrator turn that runs with the artifact as context.                                                                    |
-| Watching     | None                                                      | Claude subscribes after publish         | Publish `artifact.*` events on the message bus. Opt-in Persona watches start turns, with a rate limit.                                                                                                                                     |
-| Permissions  | None                                                      | view / comment / edit                   | Map onto space roles first. Defer per-artifact grants and public links.                                                                                                                                                                    |
+| Watching     | None                                                      | Claude subscribes after publish         | _Superseded:_ the first release only supports summoning. Opt-in Persona watches are deferred.                                                                                                                                              |
+| Permissions  | None                                                      | view / comment / edit                   | _Superseded:_ per-artifact grants and revocable org/public links ship in the first release, on top of space roles.                                                                                                                         |
 | Live updates | Per-turn SSE chunks                                       | Viewers refresh on publish              | Add an artifact-scoped SSE stream next to the chat stream, so viewers outside the conversation see updates.                                                                                                                                |
-| HTML         | Non-goal                                                  | Main format, behind a sandboxed origin  | Keep HTML out of the first release. Safe hosting needs a separate origin and a CSP, which is hard to provide on a self-hosted install.                                                                                                     |
+| HTML         | Non-goal                                                  | Main format, behind a sandboxed origin  | _Superseded:_ HTML and slides ship in the first release in an opaque-origin CSP sandbox, which works on a single hostname.                                                                                                                 |
 | Other agents | Through A2A                                               | Through MCP and URL                     | Expose the same operations through `crates/mcp-server` and keep the A2A `Artifact` mapping.                                                                                                                                                |
 
-## Proposed tool surface
+## Tool surface
 
-All tools are scoped to the current space:
+All tools are scoped to the current space and are the explicit route to
+creating or changing an artifact:
 
-- `artifact-create` takes a name, a type (`markdown`, `code`, `data`), an optional
-  language, and the content. It returns an id and version 1.
+- `artifact-create` takes a title, a kind (`html`, `slides`, `markdown`, `code`,
+  `data`), the content, and an optional language or media type. It returns an id
+  and version 1.
 - `artifact-read` takes an id and an optional version. It returns the content,
   the version, and any open comment threads.
 - `artifact-update` replaces the content. It requires `base_version`.
 - `artifact-edit` applies find/replace edits. It requires `base_version`.
-- `artifact-list` searches artifacts by name.
+- `artifact-list` searches artifacts by title.
 - `artifact-comment` replies to a comment thread or resolves it.
+
+Sharing is not a tool: grants and links are human decisions.
 
 ## Decisions taken
 
