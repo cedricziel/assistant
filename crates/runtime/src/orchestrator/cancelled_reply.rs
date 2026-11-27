@@ -9,7 +9,7 @@ use anyhow::Result;
 use tracing::debug;
 use uuid::Uuid;
 
-use assistant_core::bus_messages;
+use assistant_core::bus_messages::{self, TurnAnchor};
 use assistant_core::types::conversation::{Interface, Message, MessageFinishReason, MessageRole};
 use assistant_storage::MessageTimingStore;
 use assistant_storage::conversations::ConversationStore;
@@ -20,6 +20,15 @@ use super::Orchestrator;
 
 /// The assistant row saved when a turn is stopped before any text streamed.
 pub const CANCELLED_REPLY_PLACEHOLDER: &str = "_Stopped._";
+
+/// The cancelled turn, as its runner knows it.
+#[derive(Debug, Clone)]
+pub struct CancelledTurn {
+    /// The run that was cancelled; the rows it wrote carry this id.
+    pub run_id: Uuid,
+    /// Where the turn attached in the message tree.
+    pub anchor: TurnAnchor,
+}
 
 /// What [`save_cancelled_reply`] did.
 #[derive(Debug)]
@@ -39,18 +48,27 @@ pub(crate) enum CancelledReply {
 /// Save `text` as the stopped turn's assistant row, unless the turn already
 /// has a final answer.
 ///
-/// Only rows after the last user row belong to the turn. Tool-call rows (empty
-/// content, `tool_calls_json` set) and tool results do not count as an answer.
+/// Only the rows the cancelled run wrote belong to the turn: a regenerate's
+/// old reply sits on the same path but is not an answer to this run. Tool-call
+/// rows (empty content, `tool_calls_json` set) and tool results do not count
+/// as an answer either.
+///
+/// A regenerate that persisted nothing saves the row as a new child of its
+/// user message, so the old reply stays as the other version. In every other
+/// case the row appends to the active leaf, which is the run's own last row.
 pub(crate) async fn save_cancelled_reply(
     conv_store: &dyn ConversationStore,
     timing_store: &dyn MessageTimingStore,
     conversation_id: Uuid,
     text: &str,
+    turn: &CancelledTurn,
 ) -> Result<CancelledReply> {
     let history = conv_store.load_history(conversation_id).await?;
-    let last_user = history.iter().rposition(|m| m.role == MessageRole::User);
-    let turn_rows = &history[last_user.map_or(0, |i| i + 1)..];
-    if let Some(answer) = turn_rows.iter().find(|m| {
+    let run_rows: Vec<&Message> = history
+        .iter()
+        .filter(|m| m.run_id == Some(turn.run_id))
+        .collect();
+    if let Some(answer) = run_rows.iter().find(|m| {
         m.role == MessageRole::Assistant
             && m.tool_calls_json.is_none()
             && !m.content.trim().is_empty()
@@ -58,34 +76,60 @@ pub(crate) async fn save_cancelled_reply(
         return Ok(CancelledReply::AlreadyReplied(answer.id));
     }
 
+    // The user row the turn answered.
+    let (user_index, branch_under) = match (&turn.anchor, run_rows.is_empty()) {
+        (TurnAnchor::Regenerate { user_message_id }, true) => (
+            history.iter().position(|m| m.id == *user_message_id),
+            Some(*user_message_id),
+        ),
+        _ => (
+            history.iter().rposition(|m| m.role == MessageRole::User),
+            None,
+        ),
+    };
+
     let content = if text.trim().is_empty() {
         CANCELLED_REPLY_PLACEHOLDER
     } else {
         text
     };
     let mut message = Message::assistant(conversation_id, content);
-    message.turn = history.len() as i64;
+    // A branch starts a new path: its row follows the user row, not the old reply.
+    let position = match (branch_under, user_index) {
+        (Some(_), Some(i)) => i + 1,
+        _ => history.len(),
+    };
+    message.turn = position as i64;
+    message.run_id = Some(turn.run_id);
     message.finish_reason = Some(MessageFinishReason::Cancelled);
-    let (id, turn) = (message.id, message.turn);
-    persist_final_answer(
-        conv_store,
-        timing_store,
-        message,
-        FinalAnswerMeta::default(),
-    )
-    .await?;
+    let (id, message_turn) = (message.id, message.turn);
+    match branch_under {
+        Some(user_id) => conv_store.branch_message(&message, Some(user_id)).await?,
+        None => {
+            persist_final_answer(
+                conv_store,
+                timing_store,
+                message,
+                FinalAnswerMeta::default(),
+            )
+            .await?
+        }
+    }
 
-    let user_has_text = last_user.is_some_and(|i| !history[i].content.trim().is_empty());
+    let user_has_text = user_index.is_some_and(|i| !history[i].content.trim().is_empty());
     Ok(CancelledReply::Saved {
         id,
         content: content.to_string(),
-        turn,
+        turn: message_turn,
         user_has_text,
     })
 }
 
 impl Orchestrator {
     /// Persist the partial reply of a turn the caller saw cancelled.
+    ///
+    /// `turn` names the cancelled run and its anchor; see [`save_cancelled_reply`]
+    /// for where the row attaches.
     ///
     /// Returns the id of the turn's assistant row: the new row, or the final
     /// answer the worker saved just before the cancel won. A failure to save
@@ -99,10 +143,11 @@ impl Orchestrator {
         conversation_id: Uuid,
         text: &str,
         interface: &Interface,
+        turn: &CancelledTurn,
     ) -> Result<Uuid> {
         let store = self.storage.conversation_store_for_agent(&self.agent_id);
         let timing_store = self.storage.message_timing_store();
-        match save_cancelled_reply(&store, &timing_store, conversation_id, text).await? {
+        match save_cancelled_reply(&store, &timing_store, conversation_id, text, turn).await? {
             CancelledReply::AlreadyReplied(id) => {
                 debug!(%conversation_id, message_id = %id, "cancelled turn already has its reply");
                 Ok(id)
