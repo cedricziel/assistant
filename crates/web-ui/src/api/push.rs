@@ -126,7 +126,12 @@ pub async fn subscribe(
         .map_err(IntoResponse::into_response)?;
     ctx.storage
         .push_subscription_store()
-        .upsert(&body.endpoint, &body.p256dh, &body.auth)
+        .upsert(
+            &body.endpoint,
+            &body.p256dh,
+            &body.auth,
+            Some(&ctx.auth.user_id.0),
+        )
         .await
         .map_err(|e| internal_error(e).into_response())?;
 

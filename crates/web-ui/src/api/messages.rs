@@ -356,6 +356,14 @@ pub(crate) async fn stream_turn_to_sse(
             .and_then(|runtime| runtime.interactions.clone()),
         ctx,
     );
+    // Pushes the owner when an interaction waits and nobody answers.
+    let mut interaction_push = super::interaction_push::InteractionPushScheduler::new(
+        push_dispatcher_for_sse.clone(),
+        push_store.clone(),
+        interaction_broker.kinds().clone(),
+        ctx.auth.user_id.0.clone(),
+        conv_id.to_string(),
+    );
     let suggestion_setup = runtime
         .filter(|runtime| opts.suggestions && runtime.config.suggestions.enabled)
         .map(|runtime| (runtime.config.suggestions.clone(), runtime.llm.clone()));
@@ -473,6 +481,8 @@ pub(crate) async fn stream_turn_to_sse(
             if frame.event == "token" {
                 full_text.push_str(&frame.sse_data);
             }
+
+            interaction_push.observe(&frame);
 
             // Fire push notifications for skill / error frames.
             if frame.event == "skill_complete"
@@ -602,6 +612,7 @@ pub(crate) async fn stream_turn_to_sse(
             let _ = broadcast_tx.send(live);
             seq += 1;
         }
+        interaction_push.finish();
 
         // Decide the terminal event: `done` for a successful turn, or
         // `agent_error` with a `cancelled` reason when the turn was aborted
@@ -2421,6 +2432,7 @@ mod tests {
             &format!("{}/push", push_server.uri()),
             &p256dh,
             &auth,
+            None,
         )
         .await
         .unwrap();

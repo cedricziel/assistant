@@ -159,20 +159,43 @@ impl PushDispatcher {
         conversation_id: Option<&str>,
     ) -> Result<()> {
         let subscriptions = store.list_all().await?;
+        let message = PushMessage {
+            title,
+            body,
+            conversation_id,
+            tag: None,
+        };
+        self.deliver(store, &subscriptions, &message).await
+    }
+
+    /// Send a push notification to the subscriptions of `user_id` only.
+    /// Subscriptions stored without a user never match.
+    ///
+    /// Subscriptions that respond with `410 Gone` are deleted from `store`.
+    pub async fn send_to_user(
+        &self,
+        store: &dyn PushSubscriptionStore,
+        user_id: &str,
+        message: &PushMessage<'_>,
+    ) -> Result<()> {
+        let subscriptions = store.list_for_user(user_id).await?;
+        self.deliver(store, &subscriptions, message).await
+    }
+
+    async fn deliver(
+        &self,
+        store: &dyn PushSubscriptionStore,
+        subscriptions: &[assistant_storage::PushSubscription],
+        message: &PushMessage<'_>,
+    ) -> Result<()> {
         if subscriptions.is_empty() {
             return Ok(());
         }
 
         let signing_key = self.signing_key()?;
+        let payload = message.payload();
 
-        let payload = serde_json::json!({
-            "title": title,
-            "body": body,
-            "conversationId": conversation_id,
-        })
-        .to_string();
-
-        for sub in &subscriptions {
+        for sub in subscriptions {
             match send_one(
                 &self.client,
                 &signing_key,
@@ -199,6 +222,32 @@ impl PushDispatcher {
         }
 
         Ok(())
+    }
+}
+
+/// What a push tells the user. The service worker shows `title` and `body`,
+/// opens `conversationId` on a tap, and replaces an earlier notification that
+/// carries the same `tag` instead of stacking a second one.
+#[derive(Debug, Clone, Copy)]
+pub struct PushMessage<'a> {
+    pub title: &'a str,
+    pub body: &'a str,
+    pub conversation_id: Option<&'a str>,
+    pub tag: Option<&'a str>,
+}
+
+impl PushMessage<'_> {
+    /// The JSON the service worker reads. `tag` is left out when absent.
+    fn payload(&self) -> String {
+        let mut payload = serde_json::json!({
+            "title": self.title,
+            "body": self.body,
+            "conversationId": self.conversation_id,
+        });
+        if let Some(tag) = self.tag {
+            payload["tag"] = serde_json::Value::String(tag.to_string());
+        }
+        payload.to_string()
     }
 }
 
@@ -444,13 +493,26 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PushSubscriptionStore for CountingStore {
-        async fn upsert(&self, _endpoint: &str, _p256dh: &str, _auth: &str) -> Result<()> {
+        async fn upsert(
+            &self,
+            _endpoint: &str,
+            _p256dh: &str,
+            _auth: &str,
+            _user_id: Option<&str>,
+        ) -> Result<()> {
             Ok(())
         }
         async fn delete(&self, _endpoint: &str) -> Result<()> {
             Ok(())
         }
         async fn list_all(&self) -> Result<Vec<assistant_storage::PushSubscription>> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(vec![])
+        }
+        async fn list_for_user(
+            &self,
+            _user_id: &str,
+        ) -> Result<Vec<assistant_storage::PushSubscription>> {
             self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(vec![])
         }
@@ -502,6 +564,108 @@ mod tests {
             .unwrap();
         // Reference the mock server so the compiler doesn't elide it.
         let _ = server.uri();
+    }
+
+    // ── send_to_user ─────────────────────────────────────────────────────
+
+    /// Subscribe a browser with valid RFC 8291 key material at `endpoint`.
+    async fn subscribe_as(
+        store: &dyn PushSubscriptionStore,
+        endpoint: &str,
+        user_id: Option<&str>,
+    ) {
+        let subscriber =
+            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let p256dh = URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_encoded_point(false));
+        let auth = URL_SAFE_NO_PAD.encode([7u8; 16]);
+        store
+            .upsert(endpoint, &p256dh, &auth, user_id)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_to_user_delivers_to_that_users_endpoints_only() {
+        use assistant_storage::InMemoryPushSubscriptionStore;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+        let store = InMemoryPushSubscriptionStore::new();
+        for (path, user) in [
+            ("alice-phone", Some("alice")),
+            ("alice-laptop", Some("alice")),
+            ("bob", Some("bob")),
+            ("legacy", None),
+        ] {
+            subscribe_as(&store, &format!("{}/{path}", server.uri()), user).await;
+        }
+        let (vapid_private, _) = generate_vapid_keypair().unwrap();
+        let dispatcher = PushDispatcher::new(vapid_private);
+
+        dispatcher
+            .send_to_user(
+                &store,
+                "alice",
+                &PushMessage {
+                    title: "Approval needed",
+                    body: "The assistant wants to run 'bash'.",
+                    conversation_id: Some("conv-1"),
+                    tag: Some("interaction-i1"),
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut paths: Vec<String> = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            ["/alice-laptop", "/alice-phone"],
+            "one push per endpoint of the owner, none to other members or to rows without a user"
+        );
+    }
+
+    #[test]
+    fn payload_carries_the_tag_and_conversation_for_the_service_worker() {
+        let payload: serde_json::Value = serde_json::from_str(
+            &PushMessage {
+                title: "Approval needed",
+                body: "body",
+                conversation_id: Some("conv-1"),
+                tag: Some("interaction-i1"),
+            }
+            .payload(),
+        )
+        .unwrap();
+        assert_eq!(payload["title"], "Approval needed");
+        assert_eq!(payload["conversationId"], "conv-1");
+        assert_eq!(payload["tag"], "interaction-i1");
+    }
+
+    #[test]
+    fn payload_omits_the_tag_when_there_is_none() {
+        let payload: serde_json::Value = serde_json::from_str(
+            &PushMessage {
+                title: "New message",
+                body: "body",
+                conversation_id: None,
+                tag: None,
+            }
+            .payload(),
+        )
+        .unwrap();
+        assert!(payload.get("tag").is_none(), "{payload}");
     }
 
     // ── encrypt_payload ──────────────────────────────────────────────────
