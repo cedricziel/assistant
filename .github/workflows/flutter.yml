@@ -165,5 +165,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # flutter_smooth_markdown ships a Rust core that its build hook compiles
+      # for the target platform, so the iOS triple has to be installed.
+      - name: Install Rust target
+        run: rustup target add aarch64-apple-ios
+
       - name: Build iOS (no codesign)
         run: flutter build ios --no-codesign --release
