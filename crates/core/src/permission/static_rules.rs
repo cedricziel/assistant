@@ -371,6 +371,8 @@ fn builtin_allow() -> Vec<Rule> {
         ("load-skill", None),
         ("list-tasks", None),
         ("plan-update", None),
+        // Asking a question is not an action; the user answers it.
+        ("ask-user", None),
         ("schedule-task", None),
         ("cancel-task", None),
         ("agent-spawn", None),
@@ -607,6 +609,7 @@ mod tests {
             "list-tasks",
             "plan-update",
             "agent-status",
+            "ask-user",
         ] {
             assert_eq!(verdict(&rules, tool, json!({})), Verdict::Allow, "{tool}");
         }

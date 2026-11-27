@@ -243,6 +243,7 @@ impl ToolHandler for MockExtTool {
 }
 
 mod active_skill;
+mod ask_user;
 mod branch;
 mod bus_worker;
 mod call_context;
