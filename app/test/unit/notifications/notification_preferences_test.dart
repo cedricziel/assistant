@@ -15,6 +15,7 @@ void main() {
       expect(np.notifyChatMessages, isTrue);
       expect(np.notifySkillComplete, isTrue);
       expect(np.notifyAgentErrors, isTrue);
+      expect(np.notifyApprovalRequests, isTrue);
     });
 
     test('persist and read round-trip for notifyChatMessages', () async {
@@ -42,6 +43,17 @@ void main() {
 
       await np.setNotifyAgentErrors(false);
       expect(np.notifyAgentErrors, isFalse);
+    });
+
+    test('persist and read round-trip for notifyApprovalRequests', () async {
+      final prefs = await SharedPreferences.getInstance();
+      final np = NotificationPreferences(prefs);
+
+      await np.setNotifyApprovalRequests(false);
+      expect(np.notifyApprovalRequests, isFalse);
+
+      await np.setNotifyApprovalRequests(true);
+      expect(np.notifyApprovalRequests, isTrue);
     });
 
     test('values survive re-creation from same SharedPreferences', () async {

@@ -36,6 +36,8 @@ class ChatMessageActionsWiring extends ConsumerStatefulWidget {
     this.showResponseTiming = false,
     this.imageBaseUrl,
     this.imageAuthToken,
+    this.onFeedbackChanged,
+    this.feedbackComment,
   });
 
   final ChatMessage message;
@@ -50,6 +52,12 @@ class ChatMessageActionsWiring extends ConsumerStatefulWidget {
   final bool showResponseTiming;
   final String? imageBaseUrl;
   final String? imageAuthToken;
+
+  /// Receives a tapped feedback rating, or `null` when it is cleared.
+  final ValueChanged<MessageRating?>? onFeedbackChanged;
+
+  /// The optional feedback comment field below the actions.
+  final Widget? feedbackComment;
 
   @override
   ConsumerState<ChatMessageActionsWiring> createState() =>
@@ -83,6 +91,8 @@ class _ChatMessageActionsWiringState
       showResponseTiming: widget.showResponseTiming,
       imageBaseUrl: widget.imageBaseUrl,
       imageAuthToken: widget.imageAuthToken,
+      onFeedbackChanged: widget.onFeedbackChanged,
+      feedbackComment: widget.feedbackComment,
       isPersisted: isPersisted,
       turnWorking: busy,
       onEdit: isPersisted ? () => setState(() => _editing = true) : null,
