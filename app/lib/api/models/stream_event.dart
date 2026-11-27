@@ -741,6 +741,73 @@ class InteractionResolvedEvent extends StreamEvent {
   }
 }
 
+/// An agent-composed UI surface was created or changed.
+///
+/// Corresponds to `event:surface_update` in the SSE stream. The JSON body is
+/// `{"surface_id","tool_call_id"?,"anchor_message_id","anchor_call_index",
+/// "title","fallback_text","status","messages"}`. `messages` are A2UI v1.0
+/// messages, untouched; a status change carries an empty list.
+class SurfaceUpdateEvent extends StreamEvent {
+  const SurfaceUpdateEvent({
+    required this.surfaceId,
+    required this.anchorMessageId,
+    required this.anchorCallIndex,
+    required this.title,
+    required this.fallbackText,
+    required this.status,
+    this.toolCallId,
+    this.messages = const [],
+    super.sequenceId,
+  });
+
+  final String surfaceId;
+
+  /// Provider id of the tool call that produced the surface, when known.
+  final String? toolCallId;
+
+  /// The tool-call message the surface hangs off, and the call's index in it.
+  final String anchorMessageId;
+  final int anchorCallIndex;
+
+  final String title;
+
+  /// Plain text shown when the surface cannot be rendered.
+  final String fallbackText;
+
+  /// `active` or `submitted`.
+  final String status;
+
+  /// A2UI v1.0 messages that build the surface; empty on a status change.
+  final List<Map<String, Object?>> messages;
+
+  /// Throws a [FormatException] when a required field is missing or
+  /// malformed, so the parser skips the frame like any other malformed event.
+  factory SurfaceUpdateEvent.fromJson(
+    Map<String, dynamic> json, {
+    int? sequenceId,
+  }) {
+    final index = json['anchor_call_index'];
+    if (index is! int) {
+      throw const FormatException('anchor_call_index is required');
+    }
+    final rawMessages = json['messages'];
+    return SurfaceUpdateEvent(
+      surfaceId: _requiredString(json, 'surface_id'),
+      toolCallId: json['tool_call_id'] as String?,
+      anchorMessageId: _requiredString(json, 'anchor_message_id'),
+      anchorCallIndex: index,
+      title: json['title'] as String? ?? '',
+      fallbackText: json['fallback_text'] as String? ?? '',
+      status: _requiredString(json, 'status'),
+      messages: [
+        for (final message in rawMessages is List ? rawMessages : const [])
+          if (message is Map) message.cast<String, Object?>(),
+      ],
+      sequenceId: sequenceId,
+    );
+  }
+}
+
 String _requiredString(Map<String, dynamic> json, String key) {
   final value = json[key];
   if (value is! String || value.isEmpty) {
