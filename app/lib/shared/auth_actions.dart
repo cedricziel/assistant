@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/auth/oauth_service.dart';
 import '../features/contexts/providers/context_providers.dart';
+import '../features/notifications/notification_service.dart';
 import '../features/spaces/space_provider.dart';
 
 /// Tear down the user's session.
@@ -16,6 +17,9 @@ import '../features/spaces/space_provider.dart';
 /// - The 401 interceptor's `onAuthExpired` callback (see
 ///   `connection_provider.dart`). Both paths must produce the same end state.
 Future<void> performLogout(ProviderContainer container) async {
+  // Remove this browser's push subscription first: its DELETE needs the
+  // session that is about to be revoked.
+  await container.read(notificationServiceProvider).unsubscribeFromWebPush();
   await _revokeServerSession(container);
   container.read(spaceSelectionProvider.notifier).clear();
   await container.read(activeContextProvider.notifier).deactivate();

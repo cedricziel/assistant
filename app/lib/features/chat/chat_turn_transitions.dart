@@ -41,6 +41,7 @@ ChatState completedTurnState(
   required String userMsgId,
   required String assistantId,
   required String content,
+  MessageTiming? timing,
 }) {
   final msgs = List<ChatMessage>.from(from.messages);
   completeStreamingThinkingEntries(msgs);
@@ -54,6 +55,7 @@ ChatState completedTurnState(
       content: content,
       audioId: placeholder.audioId,
       ttsAvailable: placeholder.ttsAvailable,
+      timing: timing,
     );
   }
   return ChatState(
