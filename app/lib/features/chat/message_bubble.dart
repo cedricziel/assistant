@@ -29,6 +29,7 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
     this.onRetry,
     this.onStop,
     this.isStopping = false,
+    this.showResponseTiming = false,
     this.imageBaseUrl,
     this.imageAuthToken,
   });
@@ -38,6 +39,9 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   final VoidCallback? onRetry;
   final VoidCallback? onStop;
   final bool isStopping;
+
+  /// Whether finished replies show their response timing.
+  final bool showResponseTiming;
   final ServerCapabilities capabilities;
   final Future<({Uint8List bytes, String mimeType})?> Function()
   fetchMessageAudio;
@@ -65,6 +69,7 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
         onRetry: onRetry,
         onStop: onStop,
         isStopping: isStopping,
+        showResponseTiming: showResponseTiming,
       ),
       contextMenuBuilder: _textSelectionContextMenuBuilder,
     );

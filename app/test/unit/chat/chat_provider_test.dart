@@ -901,6 +901,97 @@ void main() {
     });
   });
 
+  // -- response timing --------------------------------------------------------
+
+  group('ChatNotifier — response timing', () {
+    const timing = MessageTiming(
+      timeToFirstToken: Duration(milliseconds: 800),
+      total: Duration(milliseconds: 3000),
+      outputTokens: 120,
+      decode: Duration(milliseconds: 2200),
+    );
+
+    testWidgets('a live done frame attaches its timing to the reply', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl = fakeApi.enqueueStream();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('hello'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl
+          ..add(
+            const DoneEvent(
+              role: 'assistant',
+              content: 'Hi',
+              messageId: 'a1',
+              timing: timing,
+            ),
+          )
+          ..close();
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pumpAndSettle();
+
+      final assistant = notifier.state.value!.messages.firstWhere(
+        (m) => !m.isUser,
+      );
+      expect(assistant.timing?.total, const Duration(milliseconds: 3000));
+      expect(assistant.timing?.outputTokens, 120);
+    });
+
+    testWidgets('a replayed done frame attaches the same timing', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final ctrl1 = fakeApi.enqueueStream();
+      fakeApi.enqueueReplayStream()
+        ..add(const TokenEvent('Hi'))
+        ..add(
+          const DoneEvent(
+            role: 'assistant',
+            content: 'Hi',
+            messageId: 'a1',
+            timing: timing,
+          ),
+        )
+        ..close();
+
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      unawaited(notifier.sendMessage('ping'));
+      await tester.pump();
+
+      await tester.runAsync(() async {
+        ctrl1.add(const RunStartedEvent('run-abc'));
+        await Future<void>.delayed(Duration.zero);
+        ctrl1.addError(const SocketException('network drop'));
+        await ctrl1.close();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+
+      final assistant = notifier.state.value!.messages.firstWhere(
+        (m) => !m.isUser,
+      );
+      expect(
+        assistant.timing?.total,
+        const Duration(milliseconds: 3000),
+        reason: 'replay through the event log keeps the same timing',
+      );
+      expect(
+        assistant.timing?.timeToFirstToken,
+        const Duration(milliseconds: 800),
+      );
+    });
+  });
+
   // -- tokenStream tests ------------------------------------------------------
 
   group('ChatNotifier.tokenStream', () {
