@@ -4,6 +4,7 @@
 
 // ignore_for_file: unused_element
 import 'package:built_collection/built_collection.dart';
+import 'package:assistant_api/src/model/surface_action_request.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 
@@ -13,7 +14,8 @@ part 'api_send_message_request.g.dart';
 ///
 /// Properties:
 /// * [attachmentIds] - Optional attachment IDs to include with this message.
-/// * [message] - The message text to send to the assistant.
+/// * [message] - The message text to send to the assistant. Empty when `surface_action` carries the turn.
+/// * [surfaceAction] - Answers an active surface after its turn ended. When present, `message` must be empty; the server builds the visible text.
 @BuiltValue()
 abstract class ApiSendMessageRequest
     implements Built<ApiSendMessageRequest, ApiSendMessageRequestBuilder> {
@@ -21,9 +23,13 @@ abstract class ApiSendMessageRequest
   @BuiltValueField(wireName: r'attachment_ids')
   BuiltList<String>? get attachmentIds;
 
-  /// The message text to send to the assistant.
+  /// The message text to send to the assistant. Empty when `surface_action` carries the turn.
   @BuiltValueField(wireName: r'message')
   String get message;
+
+  /// Answers an active surface after its turn ended. When present, `message` must be empty; the server builds the visible text.
+  @BuiltValueField(wireName: r'surface_action')
+  SurfaceActionRequest? get surfaceAction;
 
   ApiSendMessageRequest._();
 
@@ -66,6 +72,13 @@ class _$ApiSendMessageRequestSerializer
       object.message,
       specifiedType: const FullType(String),
     );
+    if (object.surfaceAction != null) {
+      yield r'surface_action';
+      yield serializers.serialize(
+        object.surfaceAction,
+        specifiedType: const FullType.nullable(SurfaceActionRequest),
+      );
+    }
   }
 
   @override
@@ -104,6 +117,14 @@ class _$ApiSendMessageRequestSerializer
             specifiedType: const FullType(String),
           ) as String;
           result.message = valueDes;
+          break;
+        case r'surface_action':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(SurfaceActionRequest),
+          ) as SurfaceActionRequest?;
+          if (valueDes == null) continue;
+          result.surfaceAction.replace(valueDes);
           break;
         default:
           unhandled.add(key);

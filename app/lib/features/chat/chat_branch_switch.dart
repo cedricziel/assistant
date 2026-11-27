@@ -11,6 +11,10 @@ import 'chat_models.dart';
 /// Lives beside the notifier so `chat_provider.dart` does not grow with every
 /// branching feature.
 mixin ChatBranchSwitching on AsyncNotifier<ChatState> {
+  /// Ends the turn in flight locally, so its late terminal frames cannot write
+  /// into the timeline this switch replaces.
+  void supersedeTurn();
+
   /// Make the version starting at [messageId] the active one.
   ///
   /// Calls `POST /api/conversations/{id}/switch-branch` and replaces the
@@ -44,6 +48,7 @@ mixin ChatBranchSwitching on AsyncNotifier<ChatState> {
       if (detail == null) throw StateError('Empty switch-branch response');
       final latest = state.value ?? const ChatState();
       if (latest.conversationId != conversationId) return;
+      supersedeTurn();
       state = AsyncData(
         latest.copyWith(
           messages: chatMessagesFromHistory(
@@ -51,6 +56,10 @@ mixin ChatBranchSwitching on AsyncNotifier<ChatState> {
             interactions: detail.interactions,
           ),
           isSwitchingBranch: false,
+          isSending: false,
+          isStopping: false,
+          streamingContent: '',
+          clearCurrentTurnStatus: true,
         ),
       );
     } catch (e) {

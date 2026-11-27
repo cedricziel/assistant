@@ -26,6 +26,7 @@ class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
     required this.message,
+    required this.senderLabel,
     this.isGrouped = false,
     this.attachments,
     this.audio,
@@ -36,6 +37,13 @@ class MessageBubble extends StatelessWidget {
   });
 
   final ChatMessage message;
+
+  /// Who sent the message, as the screen reader announces it: "You" for the
+  /// current user and the active Persona's name for assistant messages.
+  ///
+  /// It opens the bubble's semantics label, which the delivery status follows
+  /// (for example "Ada, stopped").
+  final String senderLabel;
 
   /// Whether the previous message has the same author; shrinks the top margin.
   final bool isGrouped;
@@ -63,46 +71,64 @@ class MessageBubble extends StatelessWidget {
             ? CrossAxisAlignment.end
             : CrossAxisAlignment.start,
         children: [
-          Container(
-            key: const Key('message_bubble_surface'),
-            margin: EdgeInsets.only(top: isGrouped ? 2 : 8, bottom: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            constraints: const BoxConstraints(maxWidth: 640),
-            decoration: BoxDecoration(
-              color: isUser
-                  ? colorScheme.primary
-                  : colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(16),
-                topRight: const Radius.circular(16),
-                bottomLeft: isUser
-                    ? const Radius.circular(16)
-                    : const Radius.circular(4),
-                bottomRight: isUser
-                    ? const Radius.circular(4)
-                    : const Radius.circular(16),
+          Semantics(
+            container: true,
+            explicitChildNodes: true,
+            label: _semanticsLabel,
+            child: Container(
+              key: const Key('message_bubble_surface'),
+              margin: EdgeInsets.only(top: isGrouped ? 2 : 8, bottom: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              constraints: const BoxConstraints(maxWidth: 640),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? colorScheme.primary
+                    : colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: isUser
+                      ? const Radius.circular(16)
+                      : const Radius.circular(4),
+                  bottomRight: isUser
+                      ? const Radius.circular(4)
+                      : const Radius.circular(16),
+                ),
+                border: isFailed
+                    ? Border.all(color: colorScheme.error, width: 1.5)
+                    : null,
               ),
-              border: isFailed
-                  ? Border.all(color: colorScheme.error, width: 1.5)
-                  : null,
-            ),
-            child: Column(
-              crossAxisAlignment: isUser
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ...(isUser
-                    ? _userContent(colorScheme, isFailed)
-                    : _assistantContent()),
-                ...extensions,
-              ],
+              child: Column(
+                crossAxisAlignment: isUser
+                    ? CrossAxisAlignment.end
+                    : CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...(isUser
+                      ? _userContent(colorScheme, isFailed)
+                      : _assistantContent()),
+                  ...extensions,
+                ],
+              ),
             ),
           ),
           ?actions,
         ],
       ),
     );
+  }
+
+  /// The sender, followed by the delivery status the bubble is in.
+  String get _semanticsLabel => '$senderLabel${_statusSuffix(message)}';
+
+  static String _statusSuffix(ChatMessage message) {
+    if (message.isStreaming) return ', responding';
+    return switch (message.status) {
+      MessageStatus.sending => ', sending',
+      MessageStatus.failed => ', failed',
+      MessageStatus.stopped => ', stopped',
+      MessageStatus.ok => '',
+    };
   }
 
   List<Widget> _userContent(ColorScheme colorScheme, bool isFailed) => [

@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use assistant_a2ui::{Component, SurfaceDraft};
 use assistant_core::VOICE_PLACEHOLDER;
 use assistant_core::auth::AuthContext;
 use assistant_core::bus_messages::TurnAnchor;
@@ -37,6 +38,7 @@ use assistant_runtime::orchestrator::{TurnLease, TurnMode};
 use assistant_runtime::projection::{SseProjector, StreamProjector};
 use assistant_storage::{
     ConversationEventStore as _, ConversationStore, PushSubscriptionStore, SqliteConversationStore,
+    SurfaceStore as _,
 };
 use assistant_transcription::TranscriptionRequest;
 
@@ -63,11 +65,35 @@ pub(crate) fn caller_can_post(auth: &AuthContext) -> bool {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[schema(as = ApiSendMessageRequest)]
 pub struct SendMessageRequest {
-    /// The message text to send to the assistant.
+    /// The message text to send to the assistant. Empty when `surface_action`
+    /// carries the turn.
     pub message: String,
     /// Optional attachment IDs to include with this message.
     #[serde(default)]
     pub attachment_ids: Vec<Uuid>,
+    /// Answers an active surface after its turn ended. When present,
+    /// `message` must be empty; the server builds the visible text.
+    #[serde(default)]
+    pub surface_action: Option<SurfaceActionRequest>,
+}
+
+/// The action a user took on an A2UI surface, after the turn that rendered it
+/// ended (design D8).
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct SurfaceActionRequest {
+    /// The surface the action belongs to.
+    pub surface_id: Uuid,
+    /// The action name, which the surface must declare on a Button.
+    pub name: String,
+    /// Id of the Button component that fired the action.
+    pub source_component_id: String,
+    /// The action's context payload.
+    #[schema(value_type = Object)]
+    pub context: serde_json::Value,
+    /// The surface's data model at the time of the action.
+    #[serde(default)]
+    #[schema(value_type = Option<Object>)]
+    pub data_model: Option<serde_json::Value>,
 }
 
 /// Body for `POST /api/quick-message`.
@@ -111,11 +137,13 @@ pub struct QuickMessageResponse {
     responses(
         (status = 200, description = "SSE stream of assistant tokens and final message",
          content_type = "text/event-stream"),
-        (status = 400, description = "Invalid ID or empty message"),
+        (status = 400, description = "Invalid ID, empty message, or a surface action that cannot be used"),
         (status = 401, description = "Unauthorized"),
         (status = 403, description = "Missing conversations:write scope"),
         (status = 404, description = "Conversation not found", body = ErrorBody),
-        (status = 409, description = "An edit or regenerate is running in this conversation", body = ErrorBody),
+        (status = 409, description = "An edit or regenerate is running, a turn is in flight, or the surface was already submitted", body = ErrorBody),
+        (status = 410, description = "The surface is closed by a later user message", body = ErrorBody),
+        (status = 413, description = "The surface action payload is larger than 64 KiB", body = ErrorBody),
     ),
     security(("bearer_token" = []))
 )]
@@ -138,6 +166,20 @@ pub async fn send_message(
     };
 
     let content = body.message.trim().to_string();
+    if let Some(action) = body.surface_action {
+        if !content.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                "A surface action cannot carry message text",
+            )
+                .into_response();
+        }
+        let store = caller_store(&ctx, &state).await;
+        if let Err(response) = owned_conversation(&store, conv_id).await {
+            return response;
+        }
+        return send_surface_action(&ctx, &state, &auth, conv_id, &store, action).await;
+    }
     if content.is_empty() {
         return (StatusCode::BAD_REQUEST, "Message cannot be empty").into_response();
     }
@@ -190,6 +232,169 @@ pub async fn send_message(
     .await
 }
 
+/// Largest accepted `context` plus `data_model` payload of a surface action.
+const MAX_SURFACE_ACTION_BYTES: usize = 64 * 1024;
+
+/// Answer an active surface after its turn ended: `POST .../messages` with an
+/// empty `message` and a `surface_action`. See design D8 for the check order.
+async fn send_surface_action(
+    ctx: &SpaceCtx,
+    state: &ApiState,
+    auth: &AuthContext,
+    conv_id: Uuid,
+    store: &SqliteConversationStore,
+    action: SurfaceActionRequest,
+) -> Response {
+    let surface_store = ctx.storage.surface_store();
+    let surface = match surface_store.get(action.surface_id).await {
+        Ok(Some(surface)) if surface.conversation_id == conv_id => surface,
+        Ok(_) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "No surface with that id exists in this conversation",
+            );
+        }
+        Err(e) => {
+            warn!(surface_id = %action.surface_id, error = %e, "Failed to load surface");
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    if surface.status != assistant_storage::SurfaceStatus::Active {
+        return json_error(StatusCode::CONFLICT, "This surface was already submitted");
+    }
+    let declared = serde_json::from_value::<Vec<Component>>(surface.components.clone())
+        .map(|components| {
+            SurfaceDraft {
+                title: surface.title.clone(),
+                fallback_text: surface.fallback_text.clone(),
+                components,
+                data_model: Some(surface.data_model.clone()),
+                send_data_model: surface.send_data_model,
+            }
+            .declared_action_names()
+        })
+        .unwrap_or_default();
+    if !declared.contains(&action.name) {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            format!("The surface declares no action '{}'", action.name),
+        );
+    }
+    if !action.context.is_object() {
+        return json_error(StatusCode::BAD_REQUEST, "'context' must be an object");
+    }
+    if action.data_model.as_ref().is_some_and(|m| !m.is_object()) {
+        return json_error(StatusCode::BAD_REQUEST, "'data_model' must be an object");
+    }
+
+    let path = match store.load_history(conv_id).await {
+        Ok(path) => path,
+        Err(e) => {
+            warn!(conversation_id = %conv_id, error = %e, "Failed to load history");
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    if !super::surfaces::surface_answerable(&path, &surface) {
+        return json_error(
+            StatusCode::GONE,
+            "This surface is closed because a later message started a new turn",
+        );
+    }
+
+    let payload = serde_json::json!({
+        "context": &action.context,
+        "data_model": &action.data_model,
+    });
+    let size = serde_json::to_vec(&payload).map_or(usize::MAX, |v| v.len());
+    if size > MAX_SURFACE_ACTION_BYTES {
+        return json_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "The surface action is larger than 64 KiB",
+        );
+    }
+
+    let orchestrator = match state.runtime(ctx).await {
+        Ok(runtime) => runtime.orchestrator.clone(),
+        Err(response) => return response,
+    };
+    if orchestrator.conversation_turn_in_flight(conv_id) {
+        return json_error(
+            StatusCode::CONFLICT,
+            "A turn is running in this conversation",
+        );
+    }
+
+    let mut stored_action = serde_json::json!({
+        "name": action.name,
+        "source_component_id": action.source_component_id,
+        "context": action.context,
+    });
+    if let Some(model) = action.data_model.filter(|m| !m.is_null()) {
+        stored_action["data_model"] = model;
+    }
+    let user_message_id = Uuid::new_v4();
+    match surface_store
+        .mark_submitted(surface.id, &stored_action, user_message_id)
+        .await
+    {
+        Ok(assistant_storage::Transition::Applied) => {}
+        Ok(assistant_storage::Transition::Conflict) => {
+            return json_error(StatusCode::CONFLICT, "This surface was already submitted");
+        }
+        Err(e) => {
+            warn!(surface_id = %surface.id, error = %e, "Failed to submit surface");
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    }
+
+    let run_id = Uuid::new_v4();
+    let Some(lease) = orchestrator
+        .turn_registry()
+        .try_begin(conv_id, run_id, TurnMode::Shared)
+    else {
+        // Lost the race against an edit or regenerate: undo the submit.
+        if let Err(e) = surface_store.reopen(surface.id, user_message_id).await {
+            warn!(surface_id = %surface.id, error = %e, "Failed to reopen surface");
+        }
+        return json_error(
+            StatusCode::CONFLICT,
+            "An edit or regenerate is running in this conversation",
+        );
+    };
+
+    let status = OrchestratorEvent::SurfaceUpdate {
+        surface_id: surface.id.to_string(),
+        tool_call_id: surface.tool_call_id.clone(),
+        anchor_message_id: surface.anchor_message_id.to_string(),
+        anchor_call_index: u32::try_from(surface.anchor_call_index).unwrap_or_default(),
+        title: surface.title.clone(),
+        fallback_text: surface.fallback_text.clone(),
+        status: "submitted".to_string(),
+        messages: Vec::new(),
+    };
+    let opts = RunOptions::web_turn(TurnAnchor::Append)
+        .with_user_message_id(user_message_id)
+        .with_lead_frames(vec![status])
+        .with_reopen_on_start_failure(surface.id, user_message_id);
+    // The bubble is server-built: the model-authored text is never shown as
+    // what the user said (design D8).
+    let content = format!("Submitted “{}”", surface.title);
+    let turn = opts.submit_turn(content.clone(), conv_id, auth, run_id, lease);
+    let (event_rx, turn_result_rx) = start_turn(orchestrator, turn);
+
+    stream_turn_to_sse(
+        ctx,
+        state,
+        run_id,
+        conv_id,
+        opts,
+        content,
+        event_rx,
+        turn_result_rx,
+    )
+    .await
+}
+
 /// Submit `turn` in the background and return the channels
 /// [`stream_turn_to_sse`] reads: its events and its outcome.
 pub(crate) fn start_turn(
@@ -232,6 +437,14 @@ pub(crate) struct RunOptions {
     /// The id the run persists its user row under (the answered message for a
     /// regenerate). Announced in `run_started`.
     pub user_message_id: Option<Uuid>,
+    /// Frames persisted and streamed right after `run_started`, before any
+    /// orchestrator event. A post-turn surface action announces its
+    /// `submitted` status this way.
+    pub lead_frames: Vec<OrchestratorEvent>,
+    /// A surface to roll back when the turn never starts: `(surface_id,
+    /// action_message_id)`. The submit that linked them is undone so the
+    /// surface stays answerable.
+    pub reopen_on_start_failure: Option<(Uuid, Uuid)>,
 }
 
 impl RunOptions {
@@ -245,11 +458,28 @@ impl RunOptions {
             interactive: WEB_TURNS_INTERACTIVE,
             anchor,
             user_message_id: None,
+            lead_frames: Vec::new(),
+            reopen_on_start_failure: None,
         }
     }
 
     pub(crate) const fn with_user_message_id(mut self, id: Uuid) -> Self {
         self.user_message_id = Some(id);
+        self
+    }
+
+    pub(crate) fn with_lead_frames(mut self, frames: Vec<OrchestratorEvent>) -> Self {
+        self.lead_frames = frames;
+        self
+    }
+
+    /// The surface a failed submit must return to `active`.
+    pub(crate) const fn with_reopen_on_start_failure(
+        mut self,
+        surface_id: Uuid,
+        action_message_id: Uuid,
+    ) -> Self {
+        self.reopen_on_start_failure = Some((surface_id, action_message_id));
         self
     }
 
@@ -356,6 +586,14 @@ pub(crate) async fn stream_turn_to_sse(
             .and_then(|runtime| runtime.interactions.clone()),
         ctx,
     );
+    // Pushes the owner when an interaction waits and nobody answers.
+    let mut interaction_push = super::interaction_push::InteractionPushScheduler::new(
+        push_dispatcher_for_sse.clone(),
+        push_store.clone(),
+        interaction_broker.kinds().clone(),
+        ctx.auth.user_id.0.clone(),
+        conv_id.to_string(),
+    );
     let suggestion_setup = runtime
         .filter(|runtime| opts.suggestions && runtime.config.suggestions.enabled)
         .map(|runtime| (runtime.config.suggestions.clone(), runtime.llm.clone()));
@@ -423,6 +661,47 @@ pub(crate) async fn stream_turn_to_sse(
         seq += 1;
     }
 
+    // Lead frames follow `run_started` ahead of anything the turn emits.
+    for event in &opts.lead_frames {
+        let Some(frame) = SseProjector.project(event).into_iter().next() else {
+            continue;
+        };
+        if let Err(e) = event_store
+            .append_event(
+                &run_id_str,
+                &conv_id.to_string(),
+                seq,
+                &frame.event,
+                &frame.log_payload,
+            )
+            .await
+        {
+            warn!(
+                "Failed to persist lead frame {} seq={seq} for run {run_id}: {e}",
+                frame.event
+            );
+        }
+        let _ = broadcast_tx.send(assistant_storage::LiveEvent {
+            sequence: seq,
+            event_type: frame.event.clone(),
+            payload: frame.log_payload.clone(),
+        });
+        let lead_sse = Event::default()
+            .event(frame.event.clone())
+            .data(frame.sse_data)
+            .id(seq.to_string());
+        let _ = sse_tx.send(Ok(lead_sse)).await;
+        seq += 1;
+    }
+
+    // The spawn owns its reopen seam: a surface action whose turn never
+    // started must not borrow the request context.
+    let reopen_on_start_failure =
+        opts.reopen_on_start_failure
+            .map(|(surface_id, action_message_id)| {
+                (ctx.storage.surface_store(), surface_id, action_message_id)
+            });
+
     tokio::spawn(async move {
         let mut full_text = String::new();
         let conv_id_str = conv_id.to_string();
@@ -473,6 +752,8 @@ pub(crate) async fn stream_turn_to_sse(
             if frame.event == "token" {
                 full_text.push_str(&frame.sse_data);
             }
+
+            interaction_push.observe(&frame);
 
             // Fire push notifications for skill / error frames.
             if frame.event == "skill_complete"
@@ -602,6 +883,7 @@ pub(crate) async fn stream_turn_to_sse(
             let _ = broadcast_tx.send(live);
             seq += 1;
         }
+        interaction_push.finish();
 
         // Decide the terminal event: `done` for a successful turn, or
         // `agent_error` with a `cancelled` reason when the turn was aborted
@@ -616,6 +898,7 @@ pub(crate) async fn stream_turn_to_sse(
             },
             Errored(String),
         }
+        let mut turn_never_started = false;
         let (mut reply_text, reply_message_id, reply_attachment_ids, reply_timing, terminal) =
             match run_events.into_turn_result().await {
                 Ok(Ok(result)) => (
@@ -628,23 +911,35 @@ pub(crate) async fn stream_turn_to_sse(
                 Ok(Err(e)) => {
                     let msg = e.to_string();
                     let kind = if msg.contains(assistant_runtime::TURN_CANCELLED_MARKER) {
-                        TerminalKind::Cancelled {
-                            before_start: msg
-                                .contains(assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER),
-                        }
+                        let before_start =
+                            msg.contains(assistant_runtime::TURN_CANCELLED_BEFORE_START_MARKER);
+                        turn_never_started = before_start;
+                        TerminalKind::Cancelled { before_start }
                     } else {
                         TerminalKind::Errored(msg)
                     };
                     (full_text, None, vec![], None, kind)
                 }
-                Err(_) => (
-                    full_text,
-                    None,
-                    vec![],
-                    None,
-                    TerminalKind::Errored("submit_turn channel dropped".to_string()),
-                ),
+                Err(_) => {
+                    turn_never_started = true;
+                    (
+                        full_text,
+                        None,
+                        vec![],
+                        None,
+                        TerminalKind::Errored("submit_turn channel dropped".to_string()),
+                    )
+                }
             };
+
+        // A surface action whose turn never started goes back to `active` so
+        // the user can answer it again (design D8).
+        if turn_never_started
+            && let Some((surface_store, surface_id, action_message_id)) = reopen_on_start_failure
+            && let Err(e) = surface_store.reopen(surface_id, action_message_id).await
+        {
+            warn!("Failed to reopen surface {surface_id} after a failed turn start: {e}");
+        }
 
         // The turn is over: end its pending interactions and write every
         // resolution the waiter did not get to emit, ahead of the terminal.
@@ -1639,6 +1934,7 @@ mod tests {
 
     use assistant_storage::{
         ConversationEventStore, ConversationStore, SqliteConversationStore, StorageLayer,
+        SurfaceStore as _,
     };
 
     use super::super::ApiState;
@@ -2064,6 +2360,434 @@ mod tests {
                 "{anchor:?}"
             );
         }
+    }
+
+    // -- post-turn surface actions ---------------------------------------------
+
+    /// Seed `user, assistant(tool call)` plus an `active` surface anchored on
+    /// the assistant row. With `follow_up`, a later user message closes it.
+    async fn seed_surface(
+        storage: &Arc<StorageLayer>,
+        conv_id: Uuid,
+        follow_up: bool,
+    ) -> assistant_storage::Surface {
+        use assistant_core::types::conversation::Message;
+        use assistant_storage::{NewSurface, SurfaceStore as _};
+
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let mut user = Message::user(conv_id, "plan a trip");
+        user.turn = 1;
+        store.save_message(&user).await.unwrap();
+        let mut anchor = Message::assistant(conv_id, "");
+        anchor.turn = 1;
+        anchor.tool_calls_json =
+            Some(serde_json::json!([{"name": "render-surface", "params": {}}]).to_string());
+        store.save_message(&anchor).await.unwrap();
+        let surface = storage
+            .surface_store()
+            .create(&NewSurface {
+                id: Uuid::new_v4(),
+                conversation_id: conv_id,
+                turn: 1,
+                anchor_message_id: anchor.id,
+                anchor_call_index: 0,
+                tool_call_id: Some("call_1".into()),
+                title: "Trip".into(),
+                fallback_text: "Pick a date".into(),
+                catalog_id: "cat".into(),
+                protocol_version: "1.0".into(),
+                components: serde_json::json!([
+                    {
+                        "id": "root",
+                        "component": "Button",
+                        "child": "label",
+                        "action": {"event": {"name": "submit_form"}}
+                    },
+                    {"id": "label", "component": "Text", "text": "Go"}
+                ]),
+                data_model: serde_json::json!({"name": "Ada"}),
+                send_data_model: true,
+            })
+            .await
+            .unwrap();
+        if follow_up {
+            let mut next = Message::user(conv_id, "never mind");
+            next.turn = 2;
+            store.save_message(&next).await.unwrap();
+        }
+        surface
+    }
+
+    fn surface_action_body(surface_id: Uuid, name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "message": "",
+            "surface_action": {
+                "surface_id": surface_id,
+                "name": name,
+                "source_component_id": "root",
+                "context": {"date": "2026-01-01"},
+                "data_model": {"name": "Ada"},
+            }
+        })
+    }
+
+    async fn post_action(
+        state: ApiState,
+        conv_id: Uuid,
+        body: &serde_json::Value,
+    ) -> axum::response::Response {
+        app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn surface_action_streams_submitted_after_run_started() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "all set").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+
+        let resp = post_action(
+            state.clone(),
+            conv_id,
+            &surface_action_body(surface.id, "submit_form"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let run_id = run_id_of(&resp);
+        let frames = sse_frames(resp).await;
+
+        assert_eq!(frames[0].0, "run_started", "first frame is run_started");
+        let (event, data, id) = &frames[1];
+        assert_eq!(event, "surface_update", "then the status frame");
+        assert_eq!(*id, Some(1), "the status frame follows sequence 0");
+        let status: serde_json::Value = serde_json::from_str(data).unwrap();
+        assert_eq!(status["status"], "submitted");
+        assert_eq!(status["surface_id"], surface.id.to_string());
+        assert_eq!(status["messages"], serde_json::json!([]));
+
+        let log = event_log(&storage, &run_id).await;
+        assert_eq!(log[0].1, "run_started");
+        assert_eq!(log[1].1, "surface_update", "the lead frame is replayed");
+
+        let stored = storage
+            .surface_store()
+            .get(surface.id)
+            .await
+            .unwrap()
+            .expect("the surface still exists");
+        assert_eq!(stored.status, assistant_storage::SurfaceStatus::Submitted);
+        let action = stored.action.as_ref().expect("the action is stored");
+        assert_eq!(action["name"], "submit_form");
+        assert_eq!(action["context"]["date"], "2026-01-01");
+        let action_message_id = stored.action_message_id.expect("linked to the message");
+
+        let history = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system")
+            .load_history(conv_id)
+            .await
+            .unwrap();
+        let submitted = history
+            .iter()
+            .find(|m| m.id == action_message_id)
+            .expect("the user message exists");
+        assert_eq!(submitted.content, "Submitted “Trip”");
+
+        let requests = server.received_requests().await.unwrap_or_default();
+        let sent = requests
+            .iter()
+            .rfind(|r| r.url.path() == "/api/chat")
+            .expect("the model was asked");
+        let body = String::from_utf8_lossy(&sent.body);
+        assert!(body.contains("[surface_action surface_id="), "{body}");
+        assert!(body.contains("name=submit_form"), "{body}");
+        assert!(body.contains("context"), "{body}");
+        assert!(body.contains("Submitted “Trip”"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn surface_action_turn_and_a_later_turn_both_see_the_block() {
+        let server = MockServer::start().await;
+        mount_llm_reply(&server, "all set").await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+
+        let resp = post_action(
+            state.clone(),
+            conv_id,
+            &surface_action_body(surface.id, "submit_form"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let _ = sse_frames(resp).await;
+
+        let resp = post_message(state, conv_id, "thanks").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let _ = sse_frames(resp).await;
+
+        let requests = server.received_requests().await.unwrap_or_default();
+        let bodies: Vec<String> = requests
+            .iter()
+            .filter(|r| r.url.path() == "/api/chat")
+            .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+            .collect();
+        let last_two: Vec<&String> = bodies.iter().rev().take(2).collect();
+        assert_eq!(last_two.len(), 2, "two turns were sent: {bodies:?}");
+        for body in last_two {
+            assert!(
+                body.contains("[surface_action surface_id="),
+                "every rebuild keeps the block: {body}"
+            );
+            assert!(body.contains("Submitted “Trip”"), "{body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn surface_action_is_refused_while_a_turn_is_in_flight() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+        let orchestrator = default_orchestrator(&state).await;
+        let _lease = orchestrator
+            .turn_registry()
+            .try_begin(
+                conv_id,
+                Uuid::new_v4(),
+                assistant_runtime::orchestrator::TurnMode::Shared,
+            )
+            .expect("no other turn");
+
+        let resp = post_action(
+            state,
+            conv_id,
+            &surface_action_body(surface.id, "submit_form"),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        let stored = storage
+            .surface_store()
+            .get(surface.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, assistant_storage::SurfaceStatus::Active);
+        assert!(stored.action.is_none());
+    }
+
+    #[tokio::test]
+    async fn surface_action_on_a_submitted_surface_returns_409() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+        storage
+            .surface_store()
+            .mark_submitted(
+                surface.id,
+                &serde_json::json!({"name": "submit_form"}),
+                Uuid::new_v4(),
+            )
+            .await
+            .unwrap();
+
+        let resp = post_action(
+            state,
+            conv_id,
+            &surface_action_body(surface.id, "submit_form"),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn surface_action_on_a_closed_surface_returns_410_and_changes_nothing() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, true).await;
+
+        let resp = post_action(
+            state,
+            conv_id,
+            &surface_action_body(surface.id, "submit_form"),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::GONE);
+        let body = body_json(resp.into_body()).await;
+        assert!(body.get("error").is_some(), "410 has an error body: {body}");
+        let stored = storage
+            .surface_store()
+            .get(surface.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, assistant_storage::SurfaceStatus::Active);
+        assert!(stored.action.is_none());
+    }
+
+    #[tokio::test]
+    async fn surface_action_with_text_is_refused() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+        let mut body = surface_action_body(surface.id, "submit_form");
+        body["message"] = serde_json::json!("and this text");
+
+        let resp = post_action(state, conv_id, &body).await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn surface_action_of_a_foreign_surface_returns_400() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let other = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, other, false).await;
+
+        let resp = post_action(
+            state,
+            conv_id,
+            &surface_action_body(surface.id, "submit_form"),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn surface_action_of_an_undeclared_name_returns_400() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+
+        let resp = post_action(
+            state,
+            conv_id,
+            &surface_action_body(surface.id, "not_a_button"),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn oversized_surface_action_returns_413() {
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+        let mut body = surface_action_body(surface.id, "submit_form");
+        body["surface_action"]["context"] = serde_json::json!({"blob": "x".repeat(65 * 1024)});
+
+        let resp = post_action(state, conv_id, &body).await;
+
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let stored = storage
+            .surface_store()
+            .get(surface.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, assistant_storage::SurfaceStatus::Active);
+    }
+
+    #[tokio::test]
+    async fn surface_action_without_write_scope_returns_403() {
+        use assistant_core::auth::AuthContext;
+        use assistant_core::identity::{Action, ResourceKind, Scope};
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+        let restricted = AuthContext {
+            user_id: "u1".into(),
+            org_id: "default".into(),
+            email: "u@example.com".into(),
+            space_roles: HashMap::from([(
+                assistant_core::identity::SpaceId::from("default"),
+                assistant_core::identity::Role::Member,
+            )]),
+            scopes: vec![Scope::new(ResourceKind::Personas, Action::Read)],
+            client_id: "test".into(),
+        };
+
+        let resp = app_with_auth(state, restricted)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/conversations/{conv_id}/messages"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        surface_action_body(surface.id, "submit_form").to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let stored = storage
+            .surface_store()
+            .get(surface.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.status, assistant_storage::SurfaceStatus::Active);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_turn_channel_reopens_the_submitted_surface() {
+        let (state, storage) = event_log_state().await;
+        let conv_id = new_conversation(&storage).await;
+        let surface = seed_surface(&storage, conv_id, false).await;
+        let message_id = Uuid::new_v4();
+        storage
+            .surface_store()
+            .mark_submitted(
+                surface.id,
+                &serde_json::json!({"name": "submit_form"}),
+                message_id,
+            )
+            .await
+            .unwrap();
+        let opts = RunOptions::web_turn(TurnAnchor::Append)
+            .with_reopen_on_start_failure(surface.id, message_id);
+
+        run_runner_in(&state, &storage, conv_id, opts, vec![], None).await;
+
+        let stored = storage
+            .surface_store()
+            .get(surface.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.status,
+            assistant_storage::SurfaceStatus::Active,
+            "a turn that never started leaves the surface answerable"
+        );
+        assert!(stored.action.is_none(), "the action is cleared");
     }
 
     // -- send_message frame sequence (characterisation of the streamed runner) --
@@ -2511,6 +3235,7 @@ mod tests {
             &format!("{}/push", push_server.uri()),
             &p256dh,
             &auth,
+            None,
         )
         .await
         .unwrap();
@@ -2594,6 +3319,8 @@ mod tests {
         interactive: WEB_TURNS_INTERACTIVE,
         anchor: TurnAnchor::Append,
         user_message_id: None,
+        lead_frames: Vec::new(),
+        reopen_on_start_failure: None,
     };
 
     /// Run the shared runner over hand-fed channels; returns the run id and SSE frames.
@@ -3338,6 +4065,8 @@ mod tests {
         interactive: WEB_TURNS_INTERACTIVE,
         anchor: TurnAnchor::Append,
         user_message_id: None,
+        lead_frames: Vec::new(),
+        reopen_on_start_failure: None,
     };
 
     /// State over `llm` whose org has `[suggestions]` set as given.

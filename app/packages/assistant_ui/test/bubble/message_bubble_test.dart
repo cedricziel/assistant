@@ -48,7 +48,10 @@ void main() {
     testWidgets('a user message aligns right on the primary colour', (
       tester,
     ) async {
-      await _pump(tester, MessageBubble(message: _user('Hi')));
+      await _pump(
+        tester,
+        MessageBubble(senderLabel: 'You', message: _user('Hi')),
+      );
 
       final align = tester.widget<Align>(
         find
@@ -63,7 +66,10 @@ void main() {
     testWidgets('an assistant message aligns left on the surface colour', (
       tester,
     ) async {
-      await _pump(tester, MessageBubble(message: _assistant('Hi')));
+      await _pump(
+        tester,
+        MessageBubble(senderLabel: 'Ada', message: _assistant('Hi')),
+      );
 
       final align = tester.widget<Align>(
         find
@@ -76,7 +82,10 @@ void main() {
     });
 
     testWidgets('a grouped bubble has a smaller top margin', (tester) async {
-      await _pump(tester, MessageBubble(message: _assistant('Hi')));
+      await _pump(
+        tester,
+        MessageBubble(senderLabel: 'Ada', message: _assistant('Hi')),
+      );
       expect(
         (_surfaceOf(tester).margin! as EdgeInsets).top,
         8,
@@ -85,7 +94,11 @@ void main() {
 
       await _pump(
         tester,
-        MessageBubble(message: _assistant('Hi'), isGrouped: true),
+        MessageBubble(
+          senderLabel: 'Ada',
+          message: _assistant('Hi'),
+          isGrouped: true,
+        ),
       );
       expect(
         (_surfaceOf(tester).margin! as EdgeInsets).top,
@@ -101,7 +114,10 @@ void main() {
     ) async {
       await _pump(
         tester,
-        MessageBubble(message: _user('x', status: MessageStatus.failed)),
+        MessageBubble(
+          senderLabel: 'You',
+          message: _user('x', status: MessageStatus.failed),
+        ),
       );
 
       expect(find.byIcon(Icons.error_outline), findsOneWidget);
@@ -112,7 +128,10 @@ void main() {
     testWidgets('an ok user message has no error icon or border', (
       tester,
     ) async {
-      await _pump(tester, MessageBubble(message: _user('x')));
+      await _pump(
+        tester,
+        MessageBubble(senderLabel: 'You', message: _user('x')),
+      );
 
       expect(find.byIcon(Icons.error_outline), findsNothing);
       final decoration = _surfaceOf(tester).decoration! as BoxDecoration;
@@ -124,7 +143,10 @@ void main() {
     testWidgets('shows while streaming with empty content', (tester) async {
       await _pump(
         tester,
-        MessageBubble(message: _assistant('', isStreaming: true)),
+        MessageBubble(
+          senderLabel: 'Ada',
+          message: _assistant('', isStreaming: true),
+        ),
       );
 
       expect(find.byType(TypingIndicator), findsOneWidget);
@@ -133,14 +155,20 @@ void main() {
     testWidgets('is gone once content arrives', (tester) async {
       await _pump(
         tester,
-        MessageBubble(message: _assistant('Hello', isStreaming: true)),
+        MessageBubble(
+          senderLabel: 'Ada',
+          message: _assistant('Hello', isStreaming: true),
+        ),
       );
 
       expect(find.byType(TypingIndicator), findsNothing);
     });
 
     testWidgets('is not shown for a finished empty message', (tester) async {
-      await _pump(tester, MessageBubble(message: _assistant('')));
+      await _pump(
+        tester,
+        MessageBubble(senderLabel: 'Ada', message: _assistant('')),
+      );
 
       expect(find.byType(TypingIndicator), findsNothing);
     });
@@ -151,6 +179,7 @@ void main() {
       await _pump(
         tester,
         MessageBubble(
+          senderLabel: 'You',
           message: _user('See attached'),
           attachments: _marker('attachments'),
         ),
@@ -164,7 +193,11 @@ void main() {
     testWidgets('audio replaces the text row', (tester) async {
       await _pump(
         tester,
-        MessageBubble(message: _user('Transcript'), audio: _marker('audio')),
+        MessageBubble(
+          senderLabel: 'You',
+          message: _user('Transcript'),
+          audio: _marker('audio'),
+        ),
       );
 
       expect(find.byKey(const Key('audio')), findsOneWidget);
@@ -175,6 +208,7 @@ void main() {
       await _pump(
         tester,
         MessageBubble(
+          senderLabel: 'You',
           message: _user('  \n '),
           attachments: _marker('attachments'),
         ),
@@ -185,7 +219,10 @@ void main() {
     });
 
     testWidgets('user text is plain, not markdown', (tester) async {
-      await _pump(tester, MessageBubble(message: _user('**bold**')));
+      await _pump(
+        tester,
+        MessageBubble(senderLabel: 'You', message: _user('**bold**')),
+      );
 
       expect(find.byType(SmoothMarkdown), findsNothing);
       expect(find.text('**bold**'), findsOneWidget);
@@ -195,6 +232,7 @@ void main() {
       await _pump(
         tester,
         MessageBubble(
+          senderLabel: 'You',
           message: _user('Hello'),
           contextMenuBuilder: (context, state) => const SizedBox(),
         ),
@@ -209,7 +247,10 @@ void main() {
     testWidgets('content renders as markdown through MessageBody', (
       tester,
     ) async {
-      await _pump(tester, MessageBubble(message: _assistant('**bold**')));
+      await _pump(
+        tester,
+        MessageBubble(senderLabel: 'Ada', message: _assistant('**bold**')),
+      );
 
       expect(find.byType(MessageBody), findsOneWidget);
       expect(find.byType(SmoothMarkdown), findsOneWidget);
@@ -221,6 +262,7 @@ void main() {
       await _pump(
         tester,
         MessageBubble(
+          senderLabel: 'Ada',
           message: _assistant('Here is the chart.'),
           attachments: _marker('attachments'),
           audio: _marker('audio'),
@@ -242,6 +284,7 @@ void main() {
       await _pump(
         tester,
         MessageBubble(
+          senderLabel: 'Ada',
           message: _assistant('Answer'),
           extensions: [_marker('extension')],
         ),
@@ -270,6 +313,7 @@ void main() {
       await _pump(
         tester,
         MessageBubble(
+          senderLabel: 'Ada',
           message: _assistant(
             '',
             isStreaming: true,
@@ -291,6 +335,7 @@ void main() {
       await _pump(
         tester,
         MessageBubble(
+          senderLabel: 'Ada',
           message: _assistant('Answer'),
           actions: _marker('actions'),
         ),
@@ -316,6 +361,7 @@ void main() {
       await _pump(
         tester,
         MessageBubble(
+          senderLabel: 'Ada',
           message: _assistant('![logo](https://example.com/logo.png)'),
         ),
       );

@@ -186,6 +186,7 @@ doc/StreamRunEventsQuery.md
 doc/StringList.md
 doc/SubscribeRequest.md
 doc/SubscriptionResponse.md
+doc/SurfaceActionRequest.md
 doc/SurfaceSummary.md
 doc/SwitchBranchRequest.md
 doc/Task.md
@@ -441,6 +442,7 @@ lib/src/model/stream_run_events_query.dart
 lib/src/model/string_list.dart
 lib/src/model/subscribe_request.dart
 lib/src/model/subscription_response.dart
+lib/src/model/surface_action_request.dart
 lib/src/model/surface_summary.dart
 lib/src/model/switch_branch_request.dart
 lib/src/model/task.dart

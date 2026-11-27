@@ -70,6 +70,7 @@ class ToolCallBody extends StatelessWidget {
       label: record.toolName,
       status: _status(context),
       entryState: entryState,
+      failed: record.status == ToolCallStatus.error,
       expandable: hasDetails,
       forceExpand: record.status == ToolCallStatus.error,
       body: hasDetails

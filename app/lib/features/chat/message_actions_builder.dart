@@ -10,9 +10,10 @@ import 'read_aloud_action.dart';
 /// Builds the action row shown below a message bubble.
 ///
 /// Decides which actions apply to [message] (Stop, Stopped, Read aloud, Copy,
-/// Share, Save, Retry; [isStopping] keeps Stop visible but disabled) and feeds them to [MessageActions]. [timing] and
-/// [feedback] fill the trailing slot, in that order, once the features that
-/// supply them exist.
+/// Share, Save, Retry; [isStopping] keeps Stop visible but disabled) and feeds
+/// them to [MessageActions]. The response timing indicator (only for finished
+/// replies that have a timing, and only while [showResponseTiming]) and
+/// [feedback] fill the trailing slot, in that order.
 ///
 /// Branching: Edit ([onEdit]) is offered for persisted user messages and
 /// Regenerate ([onRegenerate]) for persisted assistant messages, only while no
@@ -30,7 +31,7 @@ Widget buildMessageActions({
   VoidCallback? onRetry,
   VoidCallback? onStop,
   bool isStopping = false,
-  Widget? timing,
+  bool showResponseTiming = false,
   Widget? feedback,
   bool isPersisted = false,
   bool turnWorking = false,
@@ -42,6 +43,9 @@ Widget buildMessageActions({
 }) {
   final isUser = message.isUser;
   final alignment = isUser ? WrapAlignment.end : WrapAlignment.start;
+  final timing = !isUser && !message.isStreaming && showResponseTiming
+      ? message.timing
+      : null;
 
   if (message.isStreaming) {
     if (onStop == null) return const SizedBox.shrink();
@@ -183,7 +187,10 @@ Widget buildMessageActions({
               onPressed: onRetry,
             ),
         ],
-        trailing: [?timing, ?feedback],
+        trailing: [
+          if (timing != null) MessageTimingIndicator(timing: timing),
+          ?feedback,
+        ],
       );
     },
   );

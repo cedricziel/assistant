@@ -18,6 +18,7 @@ MessageSummary _msg({
       attachments =
       const [],
   ({String rating, String? comment})? feedback,
+  ({int totalMs, int? ttftMs, int? outputTokens, int? decodeMs})? timing,
 }) {
   return MessageSummary(
     (b) => b
@@ -34,6 +35,13 @@ MessageSummary _msg({
               ..comment = feedback.comment
               ..updatedAt = DateTime.parse('2026-05-16T00:00:00Z'))
       ..finishReason = finishReason
+      ..timing = timing == null
+          ? null
+          : (MessageTimingSummaryBuilder()
+              ..totalMs = timing.totalMs
+              ..timeToFirstTokenMs = timing.ttftMs
+              ..outputTokens = timing.outputTokens
+              ..decodeMs = timing.decodeMs)
       ..toolCalls = toolCalls.isEmpty
           ? null
           : ListBuilder<ToolCallSummary>(
@@ -140,6 +148,38 @@ void main() {
       expect(out.replyBranch?.count, 3);
       expect(out.replyBranch?.index, 2);
       expect(out.replyBranch?.siblingIds, ['r1', 'r2', 'r3']);
+    });
+
+    test('maps timing onto the row that carries it', () {
+      final out = chatMessagesFromHistory([
+        _msg(id: 'u1', role: 'user', content: 'Hello'),
+        _msg(
+          id: 'a1',
+          role: 'assistant',
+          content: 'Hi',
+          timing: (
+            totalMs: 3000,
+            ttftMs: 800,
+            outputTokens: 120,
+            decodeMs: 2200,
+          ),
+        ),
+        _msg(id: 'u2', role: 'user', content: 'Again'),
+        _msg(id: 'a2', role: 'assistant', content: 'No timing'),
+      ]);
+
+      final byId = {for (final m in out) m.id: m};
+      final timing = byId['a1']!.timing;
+      expect(
+        timing?.timeToFirstToken,
+        const Duration(milliseconds: 800),
+        reason: 'history timing must land on the assistant row that has it',
+      );
+      expect(timing?.total, const Duration(milliseconds: 3000));
+      expect(timing?.outputTokens, 120);
+      expect(timing?.decode, const Duration(milliseconds: 2200));
+      expect(byId['u1']!.timing, isNull);
+      expect(byId['a2']!.timing, isNull);
     });
 
     test('rows without branch metadata map to nulls', () {
