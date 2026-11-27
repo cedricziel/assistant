@@ -713,6 +713,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
 
   /// Start a fresh conversation (no conversation ID set).
   void clearConversation() {
+    conversationChanged();
     _session.clearDisconnected();
     _cancelFollowUps();
     state = const AsyncData(ChatState());

@@ -563,6 +563,36 @@ void main() {
       );
       unawaited(f.api.stream.close());
     });
+
+    testWidgets('a failed answer does not write into a cleared chat', (
+      tester,
+    ) async {
+      final f = await pending(tester);
+      f.api.respondGate = Completer<void>();
+      f.api.respondError = DioException(
+        requestOptions: RequestOptions(path: ''),
+        type: DioExceptionType.connectionError,
+      );
+
+      final future = f.notifier.respond(
+        'int-1',
+        const ToolApprovalAnswer(ApprovalDecision.allowOnce),
+      );
+      await f.settle();
+      f.notifier.clearConversation();
+      await f.settle();
+
+      f.api.respondGate!.complete();
+      await tester.runAsync(() => future);
+      await tester.pump();
+
+      expect(
+        f.state.error,
+        isNull,
+        reason: 'the cleared chat is not the conversation that answered',
+      );
+      unawaited(f.api.stream.close());
+    });
   });
 
   group('Stop while waiting', () {
