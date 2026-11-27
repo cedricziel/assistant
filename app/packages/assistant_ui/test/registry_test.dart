@@ -9,7 +9,13 @@ final _widgetClass = RegExp(
   r'(?:StatelessWidget|StatefulWidget)\b',
   multiLine: true,
 );
-final _adoptedVerdict = RegExp(r'^Adopt(?: \((?:have|scoped)\))?$');
+final _adoptedVerdict = RegExp(r'^Adopt\b');
+final _packagedAdoptVerdict = RegExp(r'^Adopt \((?:have|scoped)\)$');
+final _elementName = RegExp(r'`([A-Z]\w*)(?:\.\w+)?`');
+
+/// Names a row mentions that are not elements: the row for the approval card
+/// also names the entry state it renders.
+const _nonElementNames = {'EntryState'};
 
 typedef CatalogueRow = ({String verdict, String element});
 
@@ -60,6 +66,31 @@ List<String> unadoptedEntries(
   return unadopted;
 }
 
+/// Element names that a row with an Adopt (have) or Adopt (scoped) verdict
+/// names, but the registry does not contain.
+///
+/// Such a row claims the package ships the element, so a missing registration
+/// is either a forgotten entry or a stale row. Rows that adopt through a
+/// sibling change name elements that do not exist yet; they are not checked.
+List<String> unregisteredAdoptedRows(
+  Iterable<String> registry,
+  List<CatalogueRow> rows,
+) {
+  final registered = registry.toSet();
+  final missing = <String>[];
+  for (final row in rows) {
+    if (!_packagedAdoptVerdict.hasMatch(row.verdict)) continue;
+    for (final match in _elementName.allMatches(row.element)) {
+      final name = match.group(1)!;
+      if (_nonElementNames.contains(name) || registered.contains(name)) {
+        continue;
+      }
+      missing.add(name);
+    }
+  }
+  return missing;
+}
+
 void main() {
   group('exportedElements', () {
     const sources = {
@@ -97,7 +128,49 @@ void main() {
 
       expect(
         unadoptedEntries(['Alpha', 'Beta', 'Gamma', 'Delta', 'Unlisted'], rows),
-        ['Gamma', 'Delta'],
+        ['Gamma'],
+      );
+    });
+  });
+
+  group('unregisteredAdoptedRows', () {
+    const table = '''
+| #  | Element | Verdict | Flutter element | Note |
+| -- | ------- | ------- | --------------- | ---- |
+| 1  | A | Adopt (have) | `Alpha`, `Beta.slot` | |
+| 2  | B | **Adopt (scoped)** | `Gamma` | |
+| 3  | C | Adopt via sibling | `Delta` | |
+| 4  | D | Decline | `Epsilon` | |
+| 5  | E | Adopt (have) | `EntryState.awaitingInput` | |
+''';
+
+    test('flags adopted elements the registry does not contain', () {
+      expect(unregisteredAdoptedRows(['Alpha'], catalogueRows(table)), [
+        'Beta',
+        'Gamma',
+      ]);
+    });
+
+    test('checks only packaged Adopt rows', () {
+      expect(
+        unregisteredAdoptedRows([
+          'Alpha',
+          'Beta',
+          'Gamma',
+          'Epsilon',
+        ], catalogueRows(table)),
+        isEmpty,
+      );
+    });
+
+    test('ignores names that are not elements', () {
+      expect(
+        unregisteredAdoptedRows([
+          'Alpha',
+          'Beta',
+          'Gamma',
+        ], catalogueRows(table)),
+        isEmpty,
       );
     });
   });
@@ -132,5 +205,18 @@ void main() {
         reason: 'registered elements without an Adopt row in ELEMENTS.md',
       );
     });
+
+    test(
+      'registers every element an Adopt (have) or Adopt (scoped) row names',
+      () {
+        final rows = catalogueRows(File('ELEMENTS.md').readAsStringSync());
+
+        expect(
+          unregisteredAdoptedRows(kAssistantUiElements, rows),
+          isEmpty,
+          reason: 'rows claiming a packaged element missing from the registry',
+        );
+      },
+    );
   });
 }

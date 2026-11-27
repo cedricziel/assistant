@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Purity boundary for `packages/assistant_ui`
@@ -44,6 +45,33 @@ final _directive = RegExp(
   r'''^\s*(?:import|export)\s+['"]([^'"]+)['"]''',
   multiLine: true,
 );
+
+const _chatFeatureDir = 'lib/features/chat';
+
+final _appWidgetClass = RegExp(
+  r'^(?:abstract\s+)?(?:final\s+)?class\s+([A-Z]\w*)\s+extends\s+'
+  r'(?:StatelessWidget|StatefulWidget|ConsumerWidget|ConsumerStatefulWidget)\b',
+  multiLine: true,
+);
+
+/// Widgets in the app's chat feature whose name reuses an element's name.
+///
+/// Adapters compose a package element under a distinct name, so a shared name
+/// means render code is still living in the app.
+List<String> duplicateElementWidgets(
+  Map<String, String> sources,
+  Iterable<String> elements,
+) {
+  final registry = elements.toSet();
+  final duplicates = <String>[];
+  for (final MapEntry(key: path, value: source) in sources.entries) {
+    for (final match in _appWidgetClass.allMatches(source)) {
+      final name = match.group(1)!;
+      if (registry.contains(name)) duplicates.add('$path: $name');
+    }
+  }
+  return duplicates;
+}
 
 /// Top-level keys of `dependencies:` in a pubspec, without a YAML parser.
 Set<String> dependencyNames(String pubspec) {
@@ -118,6 +146,45 @@ void main() {
 
       expect(sources, isNotEmpty);
       expect(boundaryViolations(sources), isEmpty);
+    });
+
+    test(
+      'chat widgets carry distinct names from the elements they compose',
+      () {
+        final sources = {
+          for (final file
+              in Directory(_chatFeatureDir)
+                  .listSync(recursive: true)
+                  .whereType<File>()
+                  .where((f) => f.path.endsWith('.dart')))
+            file.path.substring('lib/'.length): file.readAsStringSync(),
+        };
+
+        expect(sources, isNotEmpty);
+        expect(
+          duplicateElementWidgets(sources, kAssistantUiElements),
+          isEmpty,
+          reason: 'chat adapters must not reuse an exported element name',
+        );
+      },
+    );
+  });
+
+  group('duplicateElementWidgets', () {
+    test('flags widget classes that share an element name', () {
+      final duplicates = duplicateElementWidgets(
+        {
+          'lib/features/chat/a.dart':
+              'class MessageBubble extends StatelessWidget {}\n'
+              'class ChatMessageBubbleAdapter extends StatelessWidget {}\n',
+          'lib/features/chat/b.dart':
+              'class _Private extends StatefulWidget {}\n'
+              'class Plain {\n',
+        },
+        ['MessageBubble', 'Composer'],
+      );
+
+      expect(duplicates, ['lib/features/chat/a.dart: MessageBubble']);
     });
   });
 
