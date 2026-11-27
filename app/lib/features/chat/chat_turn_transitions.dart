@@ -82,6 +82,7 @@ ChatState stoppedTurnState(
 }) {
   final msgs = List<ChatMessage>.from(from.messages);
   completeActiveTimelineEntries(msgs);
+  cancelOpenInteractions(msgs);
   for (final m in msgs) {
     for (final record in m.toolCalls) {
       if (record.status == ToolCallStatus.pending) {

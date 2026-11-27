@@ -27,28 +27,90 @@ int compareConversations(ConversationListEntry a, ConversationListEntry b) {
   return b.updatedAt.compareTo(a.updatedAt);
 }
 
+/// Orders archived conversations the way the server does: most recently
+/// archived first.
+int compareArchivedConversations(
+  ConversationListEntry a,
+  ConversationListEntry b,
+) {
+  final byArchive = (b.archivedAt ?? b.updatedAt).compareTo(
+    a.archivedAt ?? a.updatedAt,
+  );
+  return byArchive != 0 ? byArchive : b.updatedAt.compareTo(a.updatedAt);
+}
+
+/// State of the collapsible "Archived" section.
+///
+/// The archived conversations are not part of the stream snapshot. They are
+/// fetched on demand when the section is expanded, then kept current from the
+/// stream's `upserted` and `deleted` events.
+class ArchivedSectionState {
+  const ArchivedSectionState({
+    this.expanded = false,
+    this.loading = false,
+    this.loaded = false,
+    this.error,
+    this.conversations = const [],
+  });
+
+  final bool expanded;
+
+  /// A fetch is in flight.
+  final bool loading;
+
+  /// At least one fetch has succeeded, so [conversations] is meaningful.
+  final bool loaded;
+
+  final String? error;
+
+  /// Archived conversations, most recently archived first.
+  final List<ConversationListEntry> conversations;
+
+  ArchivedSectionState copyWith({
+    bool? expanded,
+    bool? loading,
+    bool? loaded,
+    String? error,
+    bool clearError = false,
+    List<ConversationListEntry>? conversations,
+  }) {
+    return ArchivedSectionState(
+      expanded: expanded ?? this.expanded,
+      loading: loading ?? this.loading,
+      loaded: loaded ?? this.loaded,
+      error: clearError ? null : (error ?? this.error),
+      conversations: conversations ?? this.conversations,
+    );
+  }
+}
+
 /// State for the conversation list.
 class ConversationListState {
   const ConversationListState({
     this.conversations = const [],
     this.isLoading = false,
     this.error,
+    this.archived = const ArchivedSectionState(),
   });
 
+  /// The unarchived conversations, pinned first.
   final List<ConversationListEntry> conversations;
   final bool isLoading;
   final String? error;
+  final ArchivedSectionState archived;
 
   ConversationListState copyWith({
     List<ConversationListEntry>? conversations,
     bool? isLoading,
     String? error,
     bool clearError = false,
+    ArchivedSectionState? archived,
   }) {
     return ConversationListState(
       conversations: conversations ?? this.conversations,
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
+      archived: archived ?? this.archived,
     );
   }
 }
@@ -68,6 +130,9 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   Timer? _debounceTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
+
+  /// Id of the newest archived fetch; an older response is discarded.
+  int _archivedRequest = 0;
   final Map<String, ConversationListEntry> _pendingUpserts = {};
 
   @override
@@ -155,7 +220,15 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
       case ConversationSnapshotEvent(:final conversations):
         _reconnectAttempts = 0;
         _flushPendingUpserts();
-        state = AsyncData(ConversationListState(conversations: conversations));
+        final current = state.value ?? const ConversationListState();
+        state = AsyncData(
+          ConversationListState(
+            conversations: conversations,
+            archived: current.archived,
+          ),
+        );
+        // The snapshot excludes archived rows: heal the open section.
+        if (current.archived.expanded) unawaited(loadArchived());
       case ConversationUpsertedEvent(:final conversation):
         _pendingUpserts[conversation.id] = conversation;
         _debounceTimer?.cancel();
@@ -173,12 +246,28 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
 
     final current = state.value ?? const ConversationListState();
     final ids = _pendingUpserts.keys.toSet();
+    final upserts = _pendingUpserts.values.toList();
+    _pendingUpserts.clear();
+
+    // An upsert lands in the list its `archivedAt` indicates, and leaves the
+    // other. An archived upsert only joins a section that has been loaded.
     final updated =
         current.conversations.where((c) => !ids.contains(c.id)).toList()
-          ..addAll(_pendingUpserts.values)
+          ..addAll(upserts.where((c) => c.archivedAt == null))
           ..sort(compareConversations);
-    _pendingUpserts.clear();
-    state = AsyncData(current.copyWith(conversations: updated));
+    final archived = current.archived.loaded
+        ? current.archived.copyWith(
+            conversations:
+                current.archived.conversations
+                    .where((c) => !ids.contains(c.id))
+                    .toList()
+                  ..addAll(upserts.where((c) => c.archivedAt != null))
+                  ..sort(compareArchivedConversations),
+          )
+        : current.archived;
+    state = AsyncData(
+      current.copyWith(conversations: updated, archived: archived),
+    );
   }
 
   void _upsert(ConversationListEntry conv) {
@@ -194,6 +283,11 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
     state = AsyncData(
       current.copyWith(
         conversations: current.conversations.where((c) => c.id != id).toList(),
+        archived: current.archived.copyWith(
+          conversations: current.archived.conversations
+              .where((c) => c.id != id)
+              .toList(),
+        ),
       ),
     );
   }
@@ -233,16 +327,18 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   /// This is a compatibility shim — the stream will also deliver the update,
   /// but this provides immediate feedback before the event arrives.
   void prependConversation(ConversationSummary conv) {
-    _upsert(
+    _upsert(_entryFromSummary(conv));
+  }
+
+  static ConversationListEntry _entryFromSummary(ConversationSummary conv) =>
       ConversationListEntry(
         id: conv.id,
         title: conv.title,
         createdAt: conv.createdAt.toUtc(),
         updatedAt: conv.updatedAt.toUtc(),
         pinnedAt: conv.pinnedAt?.toUtc(),
-      ),
-    );
-  }
+        archivedAt: conv.archivedAt?.toUtc(),
+      );
 
   /// Rename a conversation (`PATCH` with only `title`).
   ///
@@ -257,6 +353,59 @@ class ConversationListNotifier extends AsyncNotifier<ConversationListState> {
   /// is not updated here: the stream delivers the resulting `upserted` event.
   Future<String?> setPinned(String id, bool pinned) =>
       _patch(id, (b) => b.pinned = pinned);
+
+  /// Archive or unarchive a conversation (`PATCH` with only `archived`).
+  ///
+  /// Returns `null` on success, or a user-presentable error message. The list
+  /// is not updated here: the stream delivers the resulting `upserted` event.
+  Future<String?> setArchived(String id, bool archived) =>
+      _patch(id, (b) => b.archived = archived);
+
+  /// Expand or collapse the "Archived" section. Expanding fetches the
+  /// archived conversations; collapsing stops snapshot refetches.
+  Future<void> setArchivedExpanded(bool expanded) async {
+    final current = state.value ?? const ConversationListState();
+    state = AsyncData(
+      current.copyWith(archived: current.archived.copyWith(expanded: expanded)),
+    );
+    if (expanded) await loadArchived();
+  }
+
+  /// Fetch `GET /api/conversations?archived=true` and replace the archived
+  /// list. Only called on demand: when the section is expanded, and on each
+  /// new stream snapshot while it stays expanded.
+  Future<void> loadArchived() async {
+    final api = _api;
+    if (api == null) return;
+    final request = ++_archivedRequest;
+    _setArchived((a) => a.copyWith(loading: true, clearError: true));
+    try {
+      final response = await api.conversations.listConversations(
+        archived: true,
+      );
+      if (!ref.mounted || request != _archivedRequest) return;
+      final entries = [
+        for (final conv in response.data ?? const <ConversationSummary>[])
+          _entryFromSummary(conv),
+      ]..sort(compareArchivedConversations);
+      _setArchived(
+        (a) => a.copyWith(loading: false, loaded: true, conversations: entries),
+      );
+    } catch (e) {
+      if (!ref.mounted || request != _archivedRequest) return;
+      _setArchived(
+        (a) => a.copyWith(
+          loading: false,
+          error: 'Failed to load archived conversations: $e',
+        ),
+      );
+    }
+  }
+
+  void _setArchived(ArchivedSectionState Function(ArchivedSectionState) f) {
+    final current = state.value ?? const ConversationListState();
+    state = AsyncData(current.copyWith(archived: f(current.archived)));
+  }
 
   Future<String?> _patch(
     String id,

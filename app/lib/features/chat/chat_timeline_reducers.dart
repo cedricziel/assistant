@@ -2,6 +2,8 @@ import 'package:assistant_ui/models.dart';
 
 import '../../api/models/stream_event.dart';
 import 'chat_history_mapping.dart';
+import 'interaction_kinds.dart';
+import 'interaction_mapping.dart';
 
 // Pure reducers that apply one SSE event to the chat message list.
 //
@@ -266,4 +268,120 @@ ChatMessage? _subagentEntry(List<ChatMessage> msgs, String agentId) {
     }
   }
   return null;
+}
+
+// -- Interactions ------------------------------------------------------------
+
+/// Every interaction on the timeline, on tool calls and on its own entries.
+Iterable<InteractionRecord> interactionsOf(List<ChatMessage> msgs) sync* {
+  for (final m in msgs) {
+    final own = m.interaction;
+    if (own != null) yield own;
+    for (final call in m.toolCalls) {
+      final attached = call.interaction;
+      if (attached != null) yield attached;
+    }
+  }
+}
+
+/// The record of the interaction [id], or null when it is not on the timeline.
+InteractionRecord? findInteraction(List<ChatMessage> msgs, String id) =>
+    interactionsOf(msgs).where((r) => r.id == id).firstOrNull;
+
+/// Replace the interaction [id] with [update] of itself, wherever it renders.
+/// Does nothing when it is not on the timeline.
+void updateInteraction(
+  List<ChatMessage> msgs,
+  String id,
+  InteractionRecord Function(InteractionRecord record) update,
+) {
+  for (final m in msgs) {
+    final own = m.interaction;
+    if (own != null && own.id == id) m.interaction = update(own);
+    for (final call in m.toolCalls) {
+      final attached = call.interaction;
+      if (attached != null && attached.id == id) {
+        call.interaction = update(attached);
+      }
+    }
+  }
+}
+
+/// The progress label of the first interaction the turn still waits on, or
+/// null when it waits on none.
+String? awaitingLabelOf(List<ChatMessage> msgs) {
+  final open = interactionsOf(msgs).where((r) => r.isOpen).firstOrNull;
+  return open == null ? null : interactionKindSpec(open).progressLabel;
+}
+
+/// Show a requested interaction: in the footer of the tool call with its
+/// `tool_call_id`, else as an entry of its own before the reply placeholder.
+void applyInteractionRequested(
+  List<ChatMessage> msgs,
+  InteractionRequestedEvent event,
+) {
+  if (findInteraction(msgs, event.interactionId) != null) return;
+  final record = interactionRecordFromEvent(event);
+  final callId = event.toolCallId;
+  final callIdx = callId == null
+      ? -1
+      : msgs.lastIndexWhere(
+          (m) =>
+              m.timelineType == TimelineEntryType.toolCall &&
+              m.toolCalls.isNotEmpty &&
+              m.toolCalls.first.toolCallId == callId,
+        );
+  if (callIdx != -1) {
+    msgs[callIdx].toolCalls.first.interaction = record;
+    return;
+  }
+  insertBeforeStreamingPlaceholder(
+    msgs,
+    ChatMessage(
+      id: 'interaction-${event.interactionId}',
+      role: 'assistant',
+      content: '',
+      timelineType: TimelineEntryType.interaction,
+    )..interaction = record,
+  );
+}
+
+/// End an interaction: a receipt for an answer, otherwise expired or
+/// cancelled.
+void applyInteractionResolved(
+  List<ChatMessage> msgs,
+  InteractionResolvedEvent event,
+) {
+  updateInteraction(
+    msgs,
+    event.interactionId,
+    (r) => switch (event.outcome) {
+      InteractionOutcome.resolved => r.copyWith(
+        status: InteractionStatus.resolved,
+        decision: approvalDecisionFrom(event.response),
+        resolvedAt: event.resolvedAt,
+        ruleId: event.ruleId,
+      ),
+      InteractionOutcome.expired => r.copyWith(
+        status: InteractionStatus.expired,
+        resolvedAt: event.resolvedAt,
+      ),
+      InteractionOutcome.cancelled => r.copyWith(
+        status: InteractionStatus.cancelled,
+        resolvedAt: event.resolvedAt,
+      ),
+    },
+  );
+}
+
+/// Mark every interaction the turn still waits on as cancelled: the turn is
+/// over, so nobody can answer it any more.
+void cancelOpenInteractions(List<ChatMessage> msgs) {
+  for (final record in interactionsOf(msgs).where((r) => r.isOpen).toList()) {
+    updateInteraction(
+      msgs,
+      record.id,
+      (r) => r.copyWith(status: InteractionStatus.cancelled),
+    );
+  }
 }
