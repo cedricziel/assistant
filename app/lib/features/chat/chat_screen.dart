@@ -68,6 +68,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _threadController = ThreadViewportController();
   final _inputFocus = FocusNode();
 
+  /// Resolves top-level tool call bodies to their structured result views.
+  /// Built once so the scope's resolver identity stays stable across builds;
+  /// subagent timelines never consult it.
+  final _toolResultRegistry = ToolResultRendererRegistry(
+    byKind: defaultToolResultRenderers(),
+  );
+
   /// Bumped on every `chatProvider` emission so [ThreadViewport] follows
   /// in-place mutations (thinking tokens, tool status flips) that change no
   /// item count.
@@ -607,6 +614,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         );
       },
     );
-    return ChatMarkdownConfig(child: thread);
+    return ChatMarkdownConfig(
+      child: ToolResultRendererScope(
+        resolve: _toolResultRegistry.build,
+        child: thread,
+      ),
+    );
   }
 }

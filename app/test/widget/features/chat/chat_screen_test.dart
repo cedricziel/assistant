@@ -15,7 +15,12 @@ import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
 import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
 import 'package:assistant_ui/assistant_ui.dart'
-    show ApprovalCard, TimelineEntryShell, TimelineEntryView, TurnProgressCard;
+    show
+        ApprovalCard,
+        CodeFileResultView,
+        TimelineEntryShell,
+        TimelineEntryView,
+        TurnProgressCard;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1618,6 +1623,58 @@ void main() {
         ),
         findsNothing,
         reason: 'Dots must disappear once content starts streaming',
+      );
+    });
+  });
+
+  group('Chat screen — tool result renderers', () {
+    testWidgets('installs the default registry for tool call bodies', (
+      tester,
+    ) async {
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [
+            ChatMessage(
+              id: 'toolcall-file-read',
+              role: 'assistant',
+              content: '',
+              timelineType: TimelineEntryType.toolCall,
+              toolCalls: [
+                ToolCallRecord(
+                  toolName: 'file-read',
+                  status: ToolCallStatus.ok,
+                  result: 'fn main() {}',
+                  data: const {
+                    'kind': 'code_file',
+                    'path': 'src/main.rs',
+                    'language': 'rust',
+                    'content': 'fn main() {}\n',
+                    'truncated': false,
+                    'total_chars': 13,
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byType(CodeFileResultView),
+        findsNothing,
+        reason: 'a successful result stays collapsed behind the header',
+      );
+
+      await tester.tap(find.byKey(TimelineEntryShell.headerKey));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byType(CodeFileResultView),
+        findsOneWidget,
+        reason: 'ChatScreen installs defaultToolResultRenderers() in a scope',
       );
     });
   });
