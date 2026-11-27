@@ -100,21 +100,33 @@ async fn resolve_target(
     }
 }
 
+/// What a branch turn answers and how.
+struct BranchTurn {
+    conv_id: Uuid,
+    anchor: TurnAnchor,
+    /// Announced in `run_started`: the id the run saves its user row under,
+    /// or the answered message for a regenerate.
+    user_message_id: Uuid,
+    /// The text the turn answers.
+    prompt: String,
+    /// The model to answer with, for this turn only.
+    model: Option<String>,
+}
+
 /// Acquire the conversation for a branch turn and stream it.
-///
-/// `prompt` is the text the turn answers; `user_message_id` is announced in
-/// `run_started` (the id the run saves its user row under, or the answered
-/// message for a regenerate).
 async fn run_branch_turn(
     ctx: &SpaceCtx,
     state: &ApiState,
     auth: &AuthContext,
-    conv_id: Uuid,
-    anchor: TurnAnchor,
-    user_message_id: Uuid,
-    prompt: String,
-    model: Option<String>,
+    turn: BranchTurn,
 ) -> Response {
+    let BranchTurn {
+        conv_id,
+        anchor,
+        user_message_id,
+        prompt,
+        model,
+    } = turn;
     let orchestrator = match state.runtime(ctx).await {
         Ok(runtime) => runtime.orchestrator.clone(),
         Err(response) => return response,
@@ -206,11 +218,13 @@ pub async fn edit_message(
         &ctx,
         &state,
         &auth,
-        target.conv_id,
-        anchor,
-        Uuid::new_v4(),
-        text,
-        None,
+        BranchTurn {
+            conv_id: target.conv_id,
+            anchor,
+            user_message_id: Uuid::new_v4(),
+            prompt: text,
+            model: None,
+        },
     )
     .await
 }
@@ -278,11 +292,13 @@ pub async fn regenerate_message(
         &ctx,
         &state,
         &auth,
-        target.conv_id,
-        anchor,
-        user.id,
-        user.content,
-        model,
+        BranchTurn {
+            conv_id: target.conv_id,
+            anchor,
+            user_message_id: user.id,
+            prompt: user.content,
+            model,
+        },
     )
     .await
 }
