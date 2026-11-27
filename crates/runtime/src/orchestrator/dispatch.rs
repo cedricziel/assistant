@@ -30,6 +30,7 @@ use super::{
     OrchestratorEvent, value_to_params_map,
 };
 use crate::history::TurnHistory;
+use crate::interaction::ToolCallScope;
 use crate::webhook_dispatch;
 
 /// Call metadata persisted on a tool row next to the observation.
@@ -652,10 +653,16 @@ impl Orchestrator {
         let params_map = value_to_params_map(params);
 
         let start = std::time::Instant::now();
-        let exec_result = self
-            .executor
-            .execute_with(overlay, name, params_map, ctx)
-            .instrument(instrument_span.clone())
+        let call = ToolCallScope {
+            event_sink: event_sink.cloned(),
+            tool_call_id: tool_call_id.map(str::to_owned),
+        };
+        let exec_result = call
+            .scope(
+                self.executor
+                    .execute_with(overlay, name, params_map, ctx)
+                    .instrument(instrument_span.clone()),
+            )
             .await;
         let elapsed = start.elapsed();
 
