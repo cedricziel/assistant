@@ -5,6 +5,7 @@
 // ignore_for_file: unused_element
 import 'package:built_collection/built_collection.dart';
 import 'package:assistant_api/src/model/tool_call_summary.dart';
+import 'package:assistant_api/src/model/message_timing_summary.dart';
 import 'package:assistant_api/src/model/branch_info.dart';
 import 'package:assistant_api/src/model/message_feedback_summary.dart';
 import 'package:assistant_api/src/model/attachment_meta_response.dart';
@@ -28,6 +29,7 @@ part 'message_summary.g.dart';
 /// * [replyBranch] - On a user message whose reply has no visible assistant row: the versions of that reply.
 /// * [role]
 /// * [skillName] - Name of the tool or skill that produced this result (present when `role == \"tool\"`).
+/// * [timing] - How long the turn that produced this reply took. Present only on the final assistant message of a turn, omitted when none was recorded.
 /// * [toolCalls] - Tool calls made in this message (present when `role == \"assistant\"` and the message contains tool invocations).
 /// * [ttsAvailable] - Whether text-to-speech audio can be synthesised for this message. `true` when a TTS provider is configured and the message is a non-empty assistant reply.
 /// * [turn]
@@ -77,6 +79,10 @@ abstract class MessageSummary
   /// Name of the tool or skill that produced this result (present when `role == \"tool\"`).
   @BuiltValueField(wireName: r'skill_name')
   String? get skillName;
+
+  /// How long the turn that produced this reply took. Present only on the final assistant message of a turn, omitted when none was recorded.
+  @BuiltValueField(wireName: r'timing')
+  MessageTimingSummary? get timing;
 
   /// Tool calls made in this message (present when `role == \"assistant\"` and the message contains tool invocations).
   @BuiltValueField(wireName: r'tool_calls')
@@ -190,6 +196,13 @@ class _$MessageSummarySerializer
       yield serializers.serialize(
         object.skillName,
         specifiedType: const FullType.nullable(String),
+      );
+    }
+    if (object.timing != null) {
+      yield r'timing';
+      yield serializers.serialize(
+        object.timing,
+        specifiedType: const FullType.nullable(MessageTimingSummary),
       );
     }
     if (object.toolCalls != null) {
@@ -326,6 +339,14 @@ class _$MessageSummarySerializer
           ) as String?;
           if (valueDes == null) continue;
           result.skillName = valueDes;
+          break;
+        case r'timing':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(MessageTimingSummary),
+          ) as MessageTimingSummary?;
+          if (valueDes == null) continue;
+          result.timing.replace(valueDes);
           break;
         case r'tool_calls':
           final valueDes = serializers.deserialize(

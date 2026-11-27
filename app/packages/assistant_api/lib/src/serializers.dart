@@ -102,6 +102,7 @@ import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/message_feedback_summary.dart';
 import 'package:assistant_api/src/model/message_search_match.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
+import 'package:assistant_api/src/model/message_timing_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
 import 'package:assistant_api/src/model/model_summary.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
@@ -156,6 +157,7 @@ import 'package:assistant_api/src/model/space_access_entry.dart';
 import 'package:assistant_api/src/model/space_access_mode.dart';
 import 'package:assistant_api/src/model/space_detail.dart';
 import 'package:assistant_api/src/model/space_summary.dart';
+import 'package:assistant_api/src/model/sse_done_event.dart';
 import 'package:assistant_api/src/model/sse_interaction_requested_event.dart';
 import 'package:assistant_api/src/model/sse_interaction_resolved_event.dart';
 import 'package:assistant_api/src/model/sse_status_event.dart';
@@ -313,6 +315,7 @@ part 'serializers.g.dart';
   MessageFeedbackSummary,
   MessageSearchMatch,
   MessageSummary,
+  MessageTimingSummary,
   ModelPart,
   ModelSummary,
   MutualTlsSecurityScheme,
@@ -367,6 +370,7 @@ part 'serializers.g.dart';
   SpaceAccessMode,
   SpaceDetail,
   SpaceSummary,
+  SseDoneEvent,
   SseInteractionRequestedEvent,
   SseInteractionResolvedEvent,
   SseStatusEvent,

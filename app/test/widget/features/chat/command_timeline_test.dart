@@ -1,8 +1,8 @@
+import 'package:assistant_ui/assistant_ui.dart';
 import 'package:assistant_app/shared/platform/adaptive_app.dart';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
-import 'package:assistant_app/features/chat/command_event_tile.dart';
 import 'package:assistant_app/features/chat/commands_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
@@ -39,7 +39,7 @@ class _FakeConversationListNotifier extends ConversationListNotifier {
 
 void main() {
   group('Command events in timeline', () {
-    testWidgets('timeline renders CommandEventTile for command entries', (
+    testWidgets('timeline renders CommandBody for command entries', (
       tester,
     ) async {
       final chatNotifier = _FakeChatNotifier();
@@ -88,8 +88,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // The command event should render as a CommandEventTile.
-      expect(find.byType(CommandEventTile), findsOneWidget);
+      // The command event should render as a CommandBody.
+      expect(find.byType(CommandBody), findsOneWidget);
       expect(find.text('/model'), findsOneWidget);
       expect(find.text('Model set to gpt-4o'), findsOneWidget);
     });
@@ -148,7 +148,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Both command events should render.
-      expect(find.byType(CommandEventTile), findsNWidgets(2));
+      expect(find.byType(CommandBody), findsNWidgets(2));
       expect(find.text('/new'), findsOneWidget);
       expect(find.text('/compact'), findsOneWidget);
     });

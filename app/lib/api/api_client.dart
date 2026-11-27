@@ -326,21 +326,52 @@ class ApiClient {
   ///
   /// Yields [RunStartedEvent] first (from the `X-Run-Id` response header),
   /// then yields [TokenEvent]s for each incremental chunk and a final
-  /// [DoneEvent] when the server closes the stream.
+  /// [DoneEvent] when the server closes the stream. A rejected request yields
+  /// a single [ErrorEvent] carrying the HTTP status (409 while an edit or
+  /// regenerate holds the conversation).
   Stream<StreamEvent> streamMessages(
     String conversationId,
     String message, {
     List<String>? attachmentIds,
-  }) async* {
+  }) {
     final body = <String, dynamic>{'message': message};
     if (attachmentIds != null && attachmentIds.isNotEmpty) {
       body['attachment_ids'] = attachmentIds;
     }
+    return _postSse('/api/conversations/$conversationId/messages', body);
+  }
+
+  /// Edit the user message [messageId] to [text] and stream the reply on the
+  /// new branch. Same frames as [streamMessages]; a 409 yields an
+  /// [ErrorEvent] with `isConflict`.
+  Stream<StreamEvent> streamEdit(
+    String conversationId,
+    String messageId,
+    String text,
+  ) => _postSse('/api/conversations/$conversationId/messages/$messageId/edit', {
+    'message': text,
+  });
+
+  /// Regenerate the reply to [messageId] (a user message or any reply row),
+  /// optionally with another [model]. Same frames as [streamMessages]. A 404
+  /// yields an [ErrorEvent] with `isNotFound`: the run failed before saving
+  /// the user row, so callers fall back to re-sending.
+  Stream<StreamEvent> streamRegenerate(
+    String conversationId,
+    String messageId, {
+    String? model,
+  }) => _postSse(
+    '/api/conversations/$conversationId/messages/$messageId/regenerate',
+    {'model': ?model},
+  );
+
+  /// POSTs [body] as JSON to [path] and parses the SSE response.
+  Stream<StreamEvent> _postSse(String path, Map<String, dynamic> body) async* {
     final bearer = await _currentBearer();
     final Response<ResponseBody> response;
     try {
       response = await _dio.post<ResponseBody>(
-        '/api/conversations/$conversationId/messages',
+        path,
         data: jsonEncode(body),
         options: Options(
           responseType: ResponseType.stream,
@@ -352,7 +383,10 @@ class ApiClient {
         ),
       );
     } on DioException catch (e) {
-      yield ErrorEvent(e.message ?? 'Request failed');
+      yield ErrorEvent(
+        e.message ?? 'Request failed',
+        statusCode: e.response?.statusCode,
+      );
       return;
     }
 
@@ -776,6 +810,7 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           final json = jsonDecode(dataLine) as Map<String, dynamic>;
           yield RunStartedEvent(
             json['run_id'] as String? ?? '',
+            userMessageId: json['user_message_id'] as String?,
             sequenceId: seq,
           );
         } catch (_) {

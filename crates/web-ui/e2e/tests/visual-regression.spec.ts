@@ -471,10 +471,15 @@ test.describe("Authenticated pages", () => {
     await enableAccessibility(page);
     const input = page.getByRole("textbox").last();
     await input.fill("What is the weather in Berlin?");
-    await input.press("Enter");
-    await expect(
-      page.getByRole("button", { name: "What about tomorrow?" }),
-    ).toBeVisible({ timeout: 20_000 });
+    // The first send after a cold server start can be dropped while the app
+    // is still connecting, so retry until the chips confirm it went through.
+    // Flutter exposes ActionChip as a checkbox in the semantics tree.
+    await expect(async () => {
+      await input.press("Enter");
+      await expect(
+        page.getByRole("checkbox", { name: "What about tomorrow?" }),
+      ).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 30_000 });
     await page.waitForTimeout(CSS_SETTLE_MS);
     await expect(page).toHaveScreenshot("chat-follow-up-suggestions.png", {
       fullPage: true,

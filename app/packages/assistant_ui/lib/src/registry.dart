@@ -16,6 +16,7 @@ const List<String> kAssistantUiElements = [
   'CodeBlock',
   'CodeDiffResultView',
   'CodeFileResultView',
+  'CommandBody',
   'CompactExpandable',
   'Composer',
   'ComposerVoiceButton',
@@ -40,6 +41,7 @@ const List<String> kAssistantUiElements = [
   'RegenerateMenuButton',
   'SlashCommandMenu',
   'StarterPrompts',
+  'SubagentBody',
   'SuggestionChips',
   'SurfaceFrame',
   'ThinkingBody',
@@ -55,7 +57,6 @@ const List<String> kAssistantUiElements = [
   'TypingIndicator',
   'UnknownInteractionCard',
   // 'BranchPicker', // slot: message-branching 9
-  // 'CommandBody', // slot: chat-element-library 7b
   // 'FeedbackButtons', // slot: message-feedback 5
   // 'FeedbackCommentField', // slot: message-feedback 5
   // 'LinkPreviewResultView', // slot: tool-result-renderers C5
@@ -63,7 +64,6 @@ const List<String> kAssistantUiElements = [
   // 'PermissionRuleTile', // slot: tool-approval-prompts 14b
   // 'PlanResultView', // slot: tool-result-renderers C5
   // 'SourcesResultView', // slot: tool-result-renderers C4
-  // 'SubagentBody', // slot: chat-element-library 7b
   // 'TerminalResultView', // slot: tool-result-renderers C4
   // 'TimelineEntryShell', // slot: chat-element-library 5b
   // 'TimelineEntryView', // slot: chat-element-library 7c

@@ -5,6 +5,7 @@ import 'package:assistant_app/shared/platform/adaptive_app.dart';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/capabilities_provider.dart';
+import 'package:assistant_app/api/models/interaction_answer.dart';
 import 'package:assistant_app/api/models/server_capabilities.dart';
 import 'package:assistant_app/api/models/server_profile.dart';
 import 'package:assistant_app/features/chat/audio_player_widget.dart';
@@ -14,6 +15,8 @@ import 'package:assistant_app/features/chat/streaming_timeline_entry.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
 import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
+import 'package:assistant_ui/assistant_ui.dart'
+    show ApprovalCard, TimelineEntryShell, TurnProgressCard;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,6 +41,12 @@ class _FakeChatNotifier extends ChatNotifier {
 
   @override
   void stopTurn() => stopCalls++;
+
+  final responses = <(String, InteractionAnswer)>[];
+
+  @override
+  Future<void> respond(String interactionId, InteractionAnswer answer) async =>
+      responses.add((interactionId, answer));
 
   int dismissCalls = 0;
 
@@ -968,6 +977,80 @@ void main() {
       await tester.pump();
 
       expect(res.notifier.stopCalls, 1);
+    });
+
+    testWidgets('a pending approval shows its card, the awaiting label and '
+        'answers through respond()', (tester) async {
+      final res = await pumpChatScreen(tester);
+      final call =
+          ToolCallRecord(
+              toolName: 'bash',
+              status: ToolCallStatus.pending,
+              toolCallId: 'call-1',
+            )
+            ..interaction = InteractionRecord(
+              id: 'int-1',
+              kind: InteractionKind.toolApproval,
+              status: InteractionStatus.pending,
+              createdAt: DateTime.now(),
+              expiresAt: DateTime.now().add(const Duration(minutes: 10)),
+              toolCallId: 'call-1',
+              toolName: 'bash',
+              arguments: const {'command': 'git status'},
+              options: const [
+                ApprovalDecision.allowOnce,
+                ApprovalDecision.rejectOnce,
+              ],
+            );
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          isSending: true,
+          messages: [
+            ChatMessage(
+              id: 'toolcall-bash',
+              role: 'assistant',
+              content: '',
+              timelineType: TimelineEntryType.toolCall,
+              toolCalls: [call],
+            ),
+          ],
+          currentTurnStatus: TurnStatusSnapshot(
+            runId: 'run-1',
+            lastEventKind: TurnEventKind.status,
+            // Long silent: the stall label must stay hidden.
+            lastEventAt: DateTime.now().subtract(const Duration(minutes: 5)),
+            awaitingLabel: 'Waiting for your approval',
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(ApprovalCard), findsOneWidget);
+      expect(
+        tester
+            .widget<TimelineEntryShell>(find.byType(TimelineEntryShell))
+            .entryState,
+        EntryState.awaitingInput,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(TurnProgressCard),
+          matching: find.text('Waiting for your approval'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('taking longer'), findsNothing);
+
+      await tester.tap(find.text('Allow once'));
+      await tester.pump();
+
+      expect(res.notifier.responses, hasLength(1));
+      expect(res.notifier.responses.single.$1, 'int-1');
+      expect(
+        (res.notifier.responses.single.$2 as ToolApprovalAnswer).decision,
+        ApprovalDecision.allowOnce,
+      );
     });
 
     testWidgets('the error banner shows the error and dismiss calls through', (
