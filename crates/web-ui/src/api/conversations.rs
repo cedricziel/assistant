@@ -24,12 +24,14 @@ use tokio::sync::mpsc;
 use tracing::warn;
 use uuid::Uuid;
 
+use assistant_core::TurnTiming;
 use assistant_core::types::conversation::MessageRole;
 use assistant_storage::conversation_search::{SearchSegment as StoredSegment, tokenize_query};
 use assistant_storage::{
     AttachmentStore as _, ConversationEvent, ConversationPatch, ConversationRecord,
     ConversationSearchHit, ConversationStore, MessageFeedbackRow, MessageFeedbackStore as _,
-    MessageHit, MetadataUpdate, SqliteConversationStore, SurfaceStore as _,
+    MessageHit, MessageTimingStore as _, MetadataUpdate, SqliteConversationStore,
+    SurfaceStore as _,
 };
 
 use crate::errors::json_error;
@@ -391,6 +393,39 @@ pub struct MessageSummary {
     /// not rated it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feedback: Option<MessageFeedbackSummary>,
+    /// How long the turn that produced this reply took. Present only on the
+    /// final assistant message of a turn, omitted when none was recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<MessageTimingSummary>,
+}
+
+/// How long a reply took, as sent on the `done` frame and in history.
+///
+/// Absent figures are omitted, not `null`.
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+pub struct MessageTimingSummary {
+    /// Turn start to the first visible answer token, in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_to_first_token_ms: Option<u64>,
+    /// Turn start to just before the final answer was saved, in milliseconds.
+    pub total_ms: u64,
+    /// Output tokens summed over every model call in the turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    /// Time the model spent generating tokens, in milliseconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode_ms: Option<u64>,
+}
+
+impl From<&TurnTiming> for MessageTimingSummary {
+    fn from(t: &TurnTiming) -> Self {
+        Self {
+            time_to_first_token_ms: t.time_to_first_token_ms,
+            total_ms: t.total_ms,
+            output_tokens: t.output_tokens,
+            decode_ms: t.decode_ms,
+        }
+    }
 }
 
 /// The calling user's feedback on a message, as embedded in history.
@@ -890,6 +925,17 @@ pub(crate) async fn conversation_detail(
         .map(|row| (row.message_id, MessageFeedbackSummary::from(row)))
         .collect();
 
+    // Every stored turn timing of the conversation, in one query.
+    let mut timing_by_msg = ctx
+        .storage
+        .message_timing_store()
+        .get_for_conversation(conv_id)
+        .await
+        .unwrap_or_else(|e| {
+            warn!("Failed to load message timings: {e}");
+            HashMap::new()
+        });
+
     // Tool-result rows (role=tool), joined to assistant tool calls below.
     let mut tool_rows = ToolRows::new(
         history
@@ -918,6 +964,10 @@ pub(crate) async fn conversation_detail(
                 tts_configured && matches!(m.role, MessageRole::Assistant) && !m.content.is_empty();
             let attachments = attachments_by_msg.remove(&m.id).unwrap_or_default();
             let feedback = feedback_by_msg.remove(&m.id);
+            let timing = timing_by_msg
+                .remove(&m.id)
+                .as_ref()
+                .map(MessageTimingSummary::from);
             MessageSummary {
                 id: m.id,
                 role: m.role.to_string(),
@@ -933,6 +983,7 @@ pub(crate) async fn conversation_detail(
                 branch: branches.branch.remove(&m.id),
                 reply_branch: branches.reply_branch.remove(&m.id),
                 feedback,
+                timing,
             }
         })
         .collect();
@@ -1759,6 +1810,67 @@ mod tests {
         let feedback = &json["messages"][0]["feedback"];
         assert_eq!(feedback["rating"], "positive");
         assert!(feedback.get("comment").is_none(), "no comment key");
+    }
+
+    #[tokio::test]
+    async fn get_conversation_returns_timing_only_on_the_message_that_has_one() {
+        use assistant_core::TurnTiming;
+        use assistant_core::types::conversation::Message;
+        use assistant_storage::MessageTimingStore as _;
+
+        let server = MockServer::start().await;
+        let (state, storage) = test_state(&server.uri()).await;
+
+        let store = SqliteConversationStore::for_agent(storage.pool.clone(), "default")
+            .with_user_id("system");
+        let conv = store.create_conversation(Some("Test")).await.unwrap();
+        let user = Message::user(conv.id, "hi");
+        let mut earlier = Message::assistant(conv.id, "Earlier answer");
+        earlier.turn = 1;
+        let mut last = Message::assistant(conv.id, "Final answer");
+        last.turn = 2;
+        for m in [&user, &earlier, &last] {
+            store.save_message(m).await.unwrap();
+        }
+        storage
+            .message_timing_store()
+            .put(
+                conv.id,
+                last.id,
+                &TurnTiming {
+                    time_to_first_token_ms: Some(800),
+                    total_ms: 12_400,
+                    output_tokens: None,
+                    decode_ms: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let resp = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/conversations/{}", conv.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let json = body_json(resp.into_body()).await;
+        let messages = json["messages"].as_array().unwrap();
+        assert!(
+            messages[0].get("timing").is_none(),
+            "user row has no timing"
+        );
+        assert!(
+            messages[1].get("timing").is_none(),
+            "earlier reply has none"
+        );
+        assert_eq!(
+            messages[2]["timing"],
+            serde_json::json!({"time_to_first_token_ms": 800, "total_ms": 12400})
+        );
     }
 
     #[tokio::test]
