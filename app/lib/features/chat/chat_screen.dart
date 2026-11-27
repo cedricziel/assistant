@@ -497,6 +497,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                       !prevMsg.isStreaming;
                                   return ChatMessageBubbleAdapter(
                                     message: msg,
+                                    senderLabel: msg.isUser
+                                        ? 'You'
+                                        : activePersonaName,
                                     isGrouped: isGrouped,
                                     capabilities: capabilities,
                                     onRetry: msg.status == MessageStatus.failed

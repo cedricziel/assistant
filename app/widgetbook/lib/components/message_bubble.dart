@@ -64,6 +64,7 @@ final messageBubbleComponent = WidgetbookComponent(
         );
         return _padded(
           MessageBubble(
+            senderLabel: isUser ? 'You' : 'Ada',
             message: isUser ? _user(content) : _assistant(content),
             isGrouped: context.knobs.boolean(label: 'grouped'),
             actions: _actions(),
@@ -73,13 +74,15 @@ final messageBubbleComponent = WidgetbookComponent(
     ),
     WidgetbookUseCase(
       name: 'user',
-      builder: (context) =>
-          _padded(MessageBubble(message: _user('Hello there'))),
+      builder: (context) => _padded(
+        MessageBubble(senderLabel: 'You', message: _user('Hello there')),
+      ),
     ),
     WidgetbookUseCase(
       name: 'user with attachment',
       builder: (context) => _padded(
         MessageBubble(
+          senderLabel: 'You',
           message: _user('See attached'),
           attachments: _slot('chart.png', Colors.white24),
         ),
@@ -89,6 +92,7 @@ final messageBubbleComponent = WidgetbookComponent(
       name: 'user voice',
       builder: (context) => _padded(
         MessageBubble(
+          senderLabel: 'You',
           message: _user('Remind me to call Sam'),
           audio: _slot('voice message', Colors.white24),
         ),
@@ -97,7 +101,11 @@ final messageBubbleComponent = WidgetbookComponent(
     WidgetbookUseCase(
       name: 'assistant',
       builder: (context) => _padded(
-        MessageBubble(message: _assistant(_markdown), actions: _actions()),
+        MessageBubble(
+          senderLabel: 'Ada',
+          message: _assistant(_markdown),
+          actions: _actions(),
+        ),
       ),
     ),
     WidgetbookUseCase(
@@ -106,8 +114,12 @@ final messageBubbleComponent = WidgetbookComponent(
         Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            MessageBubble(message: _assistant('First part of the reply.')),
             MessageBubble(
+              senderLabel: 'Ada',
+              message: _assistant('First part of the reply.'),
+            ),
+            MessageBubble(
+              senderLabel: 'Ada',
               message: _assistant('Second part, grouped.'),
               isGrouped: true,
             ),
@@ -119,19 +131,25 @@ final messageBubbleComponent = WidgetbookComponent(
       name: 'failed',
       builder: (context) => _padded(
         MessageBubble(
+          senderLabel: 'You',
           message: _user('This did not send', status: MessageStatus.failed),
         ),
       ),
     ),
     WidgetbookUseCase(
       name: 'streaming empty',
-      builder: (context) =>
-          _padded(MessageBubble(message: _assistant('', isStreaming: true))),
+      builder: (context) => _padded(
+        MessageBubble(
+          senderLabel: 'Ada',
+          message: _assistant('', isStreaming: true),
+        ),
+      ),
     ),
     WidgetbookUseCase(
       name: 'with extension',
       builder: (context) => _padded(
         MessageBubble(
+          senderLabel: 'Ada',
           message: _assistant('Here is a card.'),
           extensions: [_slot('generative UI surface', Colors.black12)],
         ),
