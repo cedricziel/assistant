@@ -306,6 +306,78 @@ the `gen_ai.evaluation.result` event only records whether a comment exists
 (`assistant.feedback.has_comment`). See
 [opentelemetry.md](opentelemetry.md) for the event and metric reference.
 
+### Editing, regenerating and branches
+
+A conversation is a tree. Editing one of your messages or regenerating a reply
+adds a **version** next to the original instead of replacing it, so the
+original and everything built on it stay stored. One version is active at a
+time, and the chat view, the model's history, `/status`, titling and indexing
+all follow that Active Path. The version switcher ("‹ 2/3 ›") appears in the
+message's action row for every message with siblings. When a reply has no text
+of its own, its switcher appears under the message that started it.
+
+**Edit** is offered on your persisted messages, with or without attachments.
+The bubble becomes an inline editor holding the current text. Attachments stay
+visible below the field and are read-only: an edit changes the text only, and
+the attachments carry forward to the new version while the original keeps them
+too. Send stays disabled while the text is blank or unchanged, and Escape
+cancels. Sending hides the messages after the edited one while the new reply
+streams, then reloads the conversation; the edited message then shows "2/2".
+
+**Regenerate** is offered on a persisted assistant reply. It answers the same
+user message again, without adding another user message, and makes the new
+reply the active version. A regenerate that fails before writing anything
+leaves the old reply in place. Stopping one mid-stream keeps what already
+streamed, or a short stopped placeholder when nothing did, as a stopped reply
+on the new branch.
+
+**Regenerate with another model** appears when more than one model is
+offered: the org's `[llm] model` plus at least one entry of `[llm]
+available_models` in `org.toml`. Any member with write access may pick one.
+The choice applies to that one reply and does not change the conversation's
+`/model` setting, so the next normal send uses the default again. When a
+message has versions and the active one came from a model other than the
+default, the version switcher's tooltip names it.
+
+**Switching versions** moves the Active Leaf. The server descends from the
+version you picked through the most recently created child at each fork, so a
+nested branch lands at its latest message. Switching does not reorder the
+conversation list. The branch you select stays active for everything that
+follows, including a message that arrives later from a messenger.
+
+**Conversations shared with messengers.** Conversations started in Slack,
+Matrix or Mattermost can be edited, regenerated and switched on the web. The
+messenger's next message continues the branch you selected, but an edit or a
+regenerate replies on the web only: nothing is posted back to the messenger
+thread. While a branch turn holds the conversation, a messenger message for it
+is deferred and retried afterwards. A web send in the same window is rejected
+with a conflict; the message is shown as failed and can be retried.
+
+**Waiting for the user.** Edit, Regenerate and the version switcher stay
+enabled while a turn waits for an approval, a question or a surface answer.
+Choosing one cancels that wait: the pending card resolves as cancelled, the
+gated tool does not run, and the branch being left ends with a stopped reply.
+A turn that is still working is not cancelled; the branch operation gets a
+conflict and the turn keeps running.
+
+**Retry.** Retry on a failed message first tries to resume its run. When the
+run cannot be resumed, a message with a server-assigned id is regenerated
+rather than sent again, so no duplicate user message is stored. If the run
+never persisted the message, Retry falls back to sending it; a failed edit is
+re-issued as an edit.
+
+**Compaction.** Context compaction records a summary of the earlier messages
+instead of deleting them. The model sees the summary plus the messages after
+it, while the conversation keeps every message and the timeline still shows
+them. A branch that diverged before the summary's last covered message does
+not inherit the summary.
+
+**In-flight guard.** The registry that reserves a conversation for a branch
+turn lives in one process. When several services share a database, or workers
+run in other processes, a branch operation does not see a turn running
+elsewhere. The database keeps the tree consistent, but a concurrent append can
+still land on the branch being left.
+
 ### Response timing
 
 The app can show how long a reply took. It is **off by default**; turn it on
@@ -381,39 +453,43 @@ with it collapsed, up to 840 px.
 
 These endpoints power the Flutter app and are also consumable directly:
 
-| Route                                  | Method | Description                                               |
-| -------------------------------------- | ------ | --------------------------------------------------------- |
-| `/api/conversations`                   | GET    | List conversations (`?archived=true` lists archived ones) |
-| `/api/conversations`                   | POST   | Create conversation                                       |
-| `/api/conversations/stream`            | GET    | Stream conversation list changes (SSE)                    |
-| `/api/conversations/search`            | GET    | Search titles and message text (`?q=…&limit=…`)           |
-| `/api/conversations/{id}`              | GET    | Get conversation with messages                            |
-| `/api/conversations/{id}`              | PATCH  | Update title, pin or archive state                        |
-| `/api/conversations/{id}`              | DELETE | Delete conversation                                       |
-| `/api/conversations/{id}/messages`     | POST   | Send message (SSE streaming response)                     |
-| `/api/personas`                        | GET    | List personas                                             |
-| `/api/personas/active`                 | POST   | Switch active persona                                     |
-| `/api/personas/{id}`                   | PATCH  | Update a persona's starter prompts                        |
-| `/api/personas/{id}/skills`            | GET    | List skills for a persona                                 |
-| `/api/orgs`                            | GET    | List organizations (filtered by user access)              |
-| `/api/orgs`                            | POST   | Create organization                                       |
-| `/api/orgs/{id}`                       | GET    | Get organization details                                  |
-| `/api/orgs/{id}`                       | PATCH  | Update organization settings                              |
-| `/api/orgs/{org}/users`                | GET    | List users in org                                         |
-| `/api/orgs/{org}/users`                | POST   | Invite user to org                                        |
-| `/api/orgs/{org}/users/{uid}`          | GET    | Get user details                                          |
-| `/api/orgs/{org}/users/{uid}`          | PATCH  | Update user (name, role)                                  |
-| `/api/orgs/{org}/users/{uid}`          | DELETE | Remove user from org                                      |
-| `/api/orgs/{org}/spaces`               | GET    | List spaces (filtered by membership)                      |
-| `/api/orgs/{org}/spaces`               | POST   | Create space                                              |
-| `/api/orgs/{org}/spaces/{sid}`         | GET    | Get space details                                         |
-| `/api/orgs/{org}/spaces/{sid}`         | PATCH  | Update space                                              |
-| `/api/orgs/{org}/spaces/{sid}`         | DELETE | Delete space (org-admin only)                             |
-| `/api/orgs/{org}/spaces/{sid}/members` | GET    | List space members                                        |
-| `/api/orgs/{org}/spaces/{sid}/members` | POST   | Add user to space with role                               |
-| `/api/users/me/api-keys`               | GET    | List API keys (prefix + name, no secrets)                 |
-| `/api/users/me/api-keys`               | POST   | Create scoped API key (returns plaintext once)            |
-| `/api/users/me/api-keys/{kid}`         | DELETE | Revoke API key                                            |
+| Route                                                      | Method | Description                                               |
+| ---------------------------------------------------------- | ------ | --------------------------------------------------------- |
+| `/api/conversations`                                       | GET    | List conversations (`?archived=true` lists archived ones) |
+| `/api/conversations`                                       | POST   | Create conversation                                       |
+| `/api/conversations/stream`                                | GET    | Stream conversation list changes (SSE)                    |
+| `/api/conversations/search`                                | GET    | Search titles and message text (`?q=…&limit=…`)           |
+| `/api/conversations/{id}`                                  | GET    | Get conversation with messages                            |
+| `/api/conversations/{id}`                                  | PATCH  | Update title, pin or archive state                        |
+| `/api/conversations/{id}`                                  | DELETE | Delete conversation                                       |
+| `/api/conversations/{id}/messages`                         | POST   | Send message (SSE streaming response)                     |
+| `/api/conversations/{id}/messages/{message_id}/edit`       | POST   | Edit a user message and stream the new reply (SSE)        |
+| `/api/conversations/{id}/messages/{message_id}/regenerate` | POST   | Regenerate a reply, optionally with another model (SSE)   |
+| `/api/conversations/{id}/switch-branch`                    | POST   | Move the active branch to another version                 |
+| `/api/models`                                              | GET    | List the models available for regenerate                  |
+| `/api/personas`                                            | GET    | List personas                                             |
+| `/api/personas/active`                                     | POST   | Switch active persona                                     |
+| `/api/personas/{id}`                                       | PATCH  | Update a persona's starter prompts                        |
+| `/api/personas/{id}/skills`                                | GET    | List skills for a persona                                 |
+| `/api/orgs`                                                | GET    | List organizations (filtered by user access)              |
+| `/api/orgs`                                                | POST   | Create organization                                       |
+| `/api/orgs/{id}`                                           | GET    | Get organization details                                  |
+| `/api/orgs/{id}`                                           | PATCH  | Update organization settings                              |
+| `/api/orgs/{org}/users`                                    | GET    | List users in org                                         |
+| `/api/orgs/{org}/users`                                    | POST   | Invite user to org                                        |
+| `/api/orgs/{org}/users/{uid}`                              | GET    | Get user details                                          |
+| `/api/orgs/{org}/users/{uid}`                              | PATCH  | Update user (name, role)                                  |
+| `/api/orgs/{org}/users/{uid}`                              | DELETE | Remove user from org                                      |
+| `/api/orgs/{org}/spaces`                                   | GET    | List spaces (filtered by membership)                      |
+| `/api/orgs/{org}/spaces`                                   | POST   | Create space                                              |
+| `/api/orgs/{org}/spaces/{sid}`                             | GET    | Get space details                                         |
+| `/api/orgs/{org}/spaces/{sid}`                             | PATCH  | Update space                                              |
+| `/api/orgs/{org}/spaces/{sid}`                             | DELETE | Delete space (org-admin only)                             |
+| `/api/orgs/{org}/spaces/{sid}/members`                     | GET    | List space members                                        |
+| `/api/orgs/{org}/spaces/{sid}/members`                     | POST   | Add user to space with role                               |
+| `/api/users/me/api-keys`                                   | GET    | List API keys (prefix + name, no secrets)                 |
+| `/api/users/me/api-keys`                                   | POST   | Create scoped API key (returns plaintext once)            |
+| `/api/users/me/api-keys/{kid}`                             | DELETE | Revoke API key                                            |
 
 `PATCH /api/conversations/{id}` takes optional `title`, `pinned` and
 `archived` fields; at least one is required. A title is trimmed and limited to
