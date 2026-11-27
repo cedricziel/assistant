@@ -130,16 +130,19 @@ run-worker:
 # Compile the assistant binary for Apple Silicon and copy it into the Flutter
 # app's macOS bundle resources directory.
 build-macos-binary: build-web
-	rustup target add aarch64-apple-darwin 2>/dev/null || true
+	rustup target add aarch64-apple-darwin x86_64-apple-darwin 2>/dev/null || true
 	cargo build --release -p assistant-cli --target aarch64-apple-darwin
 	mkdir -p app/macos/Runner/Resources
 	cp target/aarch64-apple-darwin/release/assistant app/macos/Runner/Resources/assistant
 	chmod +x app/macos/Runner/Resources/assistant
 
 # Build the self-contained macOS .app bundle.
-# Compiles the Rust binary first, then builds the Flutter macOS app.
+# Compiles the Rust binary first, then builds the Flutter macOS app. Flutter's
+# build hooks run cargo from the pub cache, where rustup falls back to the
+# default toolchain; point them at the toolchain this repository pins.
 build-macos-bundle: build-macos-binary
-	cd app && flutter build macos --release
+	cd app && RUSTUP_TOOLCHAIN=$$(rustup show active-toolchain | awk '{print $$1}') \
+		flutter build macos --release
 
 # ── OpenAPI & Flutter client generation ──────────────────────────────────────
 

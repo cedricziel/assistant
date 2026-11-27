@@ -30,7 +30,7 @@ use p256::{
     PublicKey,
     ecdh::EphemeralSecret,
     ecdsa::{SigningKey, signature::Signer},
-    elliptic_curve::sec1::ToEncodedPoint,
+    elliptic_curve::{Generate as _, sec1::ToSec1Point},
     pkcs8::EncodePrivateKey,
 };
 use sha2::Sha256;
@@ -72,7 +72,7 @@ pub async fn ensure_vapid_keys(
 /// - The private key is PEM-encoded PKCS#8, then base64url-encoded
 /// - The public key is the raw uncompressed point (65 bytes), base64url-encoded
 pub(crate) fn generate_vapid_keypair() -> Result<(String, String)> {
-    let signing_key = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    let signing_key = SigningKey::try_generate().context("Failed to generate VAPID signing key")?;
     let verifying_key = signing_key.verifying_key();
 
     let pem = signing_key
@@ -80,7 +80,7 @@ pub(crate) fn generate_vapid_keypair() -> Result<(String, String)> {
         .context("Failed to encode VAPID private key to PEM")?;
     let priv_b64 = URL_SAFE_NO_PAD.encode(pem.as_bytes());
 
-    let point_bytes = verifying_key.to_encoded_point(false);
+    let point_bytes = verifying_key.to_sec1_point(false);
     let pub_b64 = URL_SAFE_NO_PAD.encode(point_bytes.as_bytes());
 
     Ok((priv_b64, pub_b64))
@@ -159,20 +159,70 @@ impl PushDispatcher {
         conversation_id: Option<&str>,
     ) -> Result<()> {
         let subscriptions = store.list_all().await?;
+        let message = PushMessage {
+            title,
+            body,
+            conversation_id,
+            tag: None,
+        };
+        self.deliver(store, &subscriptions, &message, None).await
+    }
+
+    /// Send a push notification to the subscriptions of `user_id` only.
+    /// Subscriptions stored without a user never match. The owner is rechecked
+    /// immediately before each send, because `upsert` can rebind an endpoint to
+    /// another user on a shared browser after the snapshot above.
+    ///
+    /// Subscriptions that respond with `410 Gone` are deleted from `store`.
+    pub async fn send_to_user(
+        &self,
+        store: &dyn PushSubscriptionStore,
+        user_id: &str,
+        message: &PushMessage<'_>,
+    ) -> Result<()> {
+        let subscriptions = store.list_for_user(user_id).await?;
+        self.deliver(store, &subscriptions, message, Some(user_id))
+            .await
+    }
+
+    /// Deliver `message` to `subscriptions`. With `owner`, each subscription's
+    /// current owner is rechecked just before its send and skipped when the
+    /// row is gone or now belongs to someone else.
+    async fn deliver(
+        &self,
+        store: &dyn PushSubscriptionStore,
+        subscriptions: &[assistant_storage::PushSubscription],
+        message: &PushMessage<'_>,
+        owner: Option<&str>,
+    ) -> Result<()> {
         if subscriptions.is_empty() {
             return Ok(());
         }
 
         let signing_key = self.signing_key()?;
+        let payload = message.payload();
 
-        let payload = serde_json::json!({
-            "title": title,
-            "body": body,
-            "conversationId": conversation_id,
-        })
-        .to_string();
+        for sub in subscriptions {
+            if let Some(owner) = owner {
+                match store.get_by_endpoint(&sub.endpoint).await {
+                    Ok(Some(current)) if current.user_id.as_deref() == Some(owner) => {}
+                    Ok(_) => {
+                        warn!(
+                            "Skipping push to {}: it no longer belongs to {owner}",
+                            sub.endpoint
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Skipping push to {}: could not recheck its owner: {e}",
+                            sub.endpoint
+                        );
+                        continue;
+                    }
+                }
+            }
 
-        for sub in &subscriptions {
             match send_one(
                 &self.client,
                 &signing_key,
@@ -199,6 +249,32 @@ impl PushDispatcher {
         }
 
         Ok(())
+    }
+}
+
+/// What a push tells the user. The service worker shows `title` and `body`,
+/// opens `conversationId` on a tap, and replaces an earlier notification that
+/// carries the same `tag` instead of stacking a second one.
+#[derive(Debug, Clone, Copy)]
+pub struct PushMessage<'a> {
+    pub title: &'a str,
+    pub body: &'a str,
+    pub conversation_id: Option<&'a str>,
+    pub tag: Option<&'a str>,
+}
+
+impl PushMessage<'_> {
+    /// The JSON the service worker reads. `tag` is left out when absent.
+    fn payload(&self) -> String {
+        let mut payload = serde_json::json!({
+            "title": self.title,
+            "body": self.body,
+            "conversationId": self.conversation_id,
+        });
+        if let Some(tag) = self.tag {
+            payload["tag"] = serde_json::Value::String(tag.to_string());
+        }
+        payload.to_string()
     }
 }
 
@@ -241,12 +317,8 @@ async fn send_one(
     let vapid_token = build_vapid_jwt(signing_key, endpoint)
         .map_err(|e| PushError::Other(e.context("VAPID JWT failed")))?;
 
-    let vapid_public_key = URL_SAFE_NO_PAD.encode(
-        signing_key
-            .verifying_key()
-            .to_encoded_point(false)
-            .as_bytes(),
-    );
+    let vapid_public_key =
+        URL_SAFE_NO_PAD.encode(signing_key.verifying_key().to_sec1_point(false).as_bytes());
 
     // POST to push endpoint.
     let resp = client
@@ -295,9 +367,10 @@ fn encrypt_payload(
         .context("Invalid receiver P-256 public key")?;
 
     // Generate an ephemeral sender key pair.
-    let sender_secret = EphemeralSecret::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    let sender_secret =
+        EphemeralSecret::try_generate().context("Failed to generate ephemeral sender key")?;
     let sender_pub = sender_secret.public_key();
-    let sender_pub_bytes = sender_pub.to_encoded_point(false).as_bytes().to_vec();
+    let sender_pub_bytes = sender_pub.to_sec1_point(false).as_bytes().to_vec();
 
     // ECDH shared secret.
     let shared_secret = sender_secret.diffie_hellman(&receiver_pub);
@@ -305,8 +378,7 @@ fn encrypt_payload(
 
     // Random 16-byte salt.
     let mut salt = [0u8; 16];
-    use p256::elliptic_curve::rand_core::RngCore as _;
-    p256::elliptic_curve::rand_core::OsRng.fill_bytes(&mut salt);
+    getrandom::fill(&mut salt).map_err(|e| anyhow::anyhow!("OS RNG failure: {e}"))?;
 
     // RFC 8291 §3.3 — derive PRK via HKDF-SHA-256 with the auth secret.
     // ikm = ECDH output, salt = auth_secret, info = "WebPush: info\0" || ua_pub || as_pub
@@ -444,7 +516,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PushSubscriptionStore for CountingStore {
-        async fn upsert(&self, _endpoint: &str, _p256dh: &str, _auth: &str) -> Result<()> {
+        async fn upsert(
+            &self,
+            _endpoint: &str,
+            _p256dh: &str,
+            _auth: &str,
+            _user_id: Option<&str>,
+        ) -> Result<()> {
             Ok(())
         }
         async fn delete(&self, _endpoint: &str) -> Result<()> {
@@ -453,6 +531,19 @@ mod tests {
         async fn list_all(&self) -> Result<Vec<assistant_storage::PushSubscription>> {
             self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(vec![])
+        }
+        async fn list_for_user(
+            &self,
+            _user_id: &str,
+        ) -> Result<Vec<assistant_storage::PushSubscription>> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(vec![])
+        }
+        async fn get_by_endpoint(
+            &self,
+            _endpoint: &str,
+        ) -> Result<Option<assistant_storage::PushSubscription>> {
+            Ok(None)
         }
     }
 
@@ -504,6 +595,241 @@ mod tests {
         let _ = server.uri();
     }
 
+    // ── send_to_user ─────────────────────────────────────────────────────
+
+    /// Subscribe a browser with valid RFC 8291 key material at `endpoint`.
+    async fn subscribe_as(
+        store: &dyn PushSubscriptionStore,
+        endpoint: &str,
+        user_id: Option<&str>,
+    ) {
+        let subscriber =
+            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let p256dh = URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_encoded_point(false));
+        let auth = URL_SAFE_NO_PAD.encode([7u8; 16]);
+        store
+            .upsert(endpoint, &p256dh, &auth, user_id)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_to_user_delivers_to_that_users_endpoints_only() {
+        use assistant_storage::InMemoryPushSubscriptionStore;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+        let store = InMemoryPushSubscriptionStore::new();
+        for (path, user) in [
+            ("alice-phone", Some("alice")),
+            ("alice-laptop", Some("alice")),
+            ("bob", Some("bob")),
+            ("legacy", None),
+        ] {
+            subscribe_as(&store, &format!("{}/{path}", server.uri()), user).await;
+        }
+        let (vapid_private, _) = generate_vapid_keypair().unwrap();
+        let dispatcher = PushDispatcher::new(vapid_private);
+
+        dispatcher
+            .send_to_user(
+                &store,
+                "alice",
+                &PushMessage {
+                    title: "Approval needed",
+                    body: "The assistant wants to run 'bash'.",
+                    conversation_id: Some("conv-1"),
+                    tag: Some("interaction-i1"),
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut paths: Vec<String> = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|r| r.url.path().to_string())
+            .collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            ["/alice-laptop", "/alice-phone"],
+            "one push per endpoint of the owner, none to other members or to rows without a user"
+        );
+    }
+
+    /// A store whose `list_for_user` snapshot is stale: the endpoint has been
+    /// rebound to another user (or deleted) before the send happens.
+    struct ReboundStore {
+        snapshot: Vec<assistant_storage::PushSubscription>,
+        current: Option<assistant_storage::PushSubscription>,
+    }
+
+    #[async_trait::async_trait]
+    impl PushSubscriptionStore for ReboundStore {
+        async fn upsert(
+            &self,
+            _endpoint: &str,
+            _p256dh: &str,
+            _auth: &str,
+            _user_id: Option<&str>,
+        ) -> Result<()> {
+            Ok(())
+        }
+        async fn delete(&self, _endpoint: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn list_all(&self) -> Result<Vec<assistant_storage::PushSubscription>> {
+            Ok(self.snapshot.clone())
+        }
+        async fn list_for_user(
+            &self,
+            _user_id: &str,
+        ) -> Result<Vec<assistant_storage::PushSubscription>> {
+            Ok(self.snapshot.clone())
+        }
+        async fn get_by_endpoint(
+            &self,
+            _endpoint: &str,
+        ) -> Result<Option<assistant_storage::PushSubscription>> {
+            Ok(self.current.clone())
+        }
+    }
+
+    fn subscription(endpoint: &str, user_id: &str) -> assistant_storage::PushSubscription {
+        assistant_storage::PushSubscription {
+            id: 1,
+            endpoint: endpoint.to_string(),
+            p256dh: "unused".into(),
+            auth: "unused".into(),
+            user_id: Some(user_id.into()),
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rebound_endpoint_does_not_get_the_previous_owners_push() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+        let endpoint = format!("{}/shared-browser", server.uri());
+        let store = ReboundStore {
+            snapshot: vec![subscription(&endpoint, "alice")],
+            // Another user rebound the same browser after the snapshot.
+            current: Some(subscription(&endpoint, "bob")),
+        };
+        let (vapid_private, _) = generate_vapid_keypair().unwrap();
+        let dispatcher = PushDispatcher::new(vapid_private);
+
+        dispatcher
+            .send_to_user(
+                &store,
+                "alice",
+                &PushMessage {
+                    title: "Approval needed",
+                    body: "body",
+                    conversation_id: Some("conv-1"),
+                    tag: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty(),
+            "the endpoint belongs to bob now, so alice's push must not be sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_deleted_endpoint_does_not_get_the_previous_owners_push() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+        let endpoint = format!("{}/gone", server.uri());
+        let store = ReboundStore {
+            snapshot: vec![subscription(&endpoint, "alice")],
+            current: None,
+        };
+        let (vapid_private, _) = generate_vapid_keypair().unwrap();
+        let dispatcher = PushDispatcher::new(vapid_private);
+
+        dispatcher
+            .send_to_user(
+                &store,
+                "alice",
+                &PushMessage {
+                    title: "Approval needed",
+                    body: "body",
+                    conversation_id: Some("conv-1"),
+                    tag: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn payload_carries_the_tag_and_conversation_for_the_service_worker() {
+        let payload: serde_json::Value = serde_json::from_str(
+            &PushMessage {
+                title: "Approval needed",
+                body: "body",
+                conversation_id: Some("conv-1"),
+                tag: Some("interaction-i1"),
+            }
+            .payload(),
+        )
+        .unwrap();
+        assert_eq!(payload["title"], "Approval needed");
+        assert_eq!(payload["conversationId"], "conv-1");
+        assert_eq!(payload["tag"], "interaction-i1");
+    }
+
+    #[test]
+    fn payload_omits_the_tag_when_there_is_none() {
+        let payload: serde_json::Value = serde_json::from_str(
+            &PushMessage {
+                title: "New message",
+                body: "body",
+                conversation_id: None,
+                tag: None,
+            }
+            .payload(),
+        )
+        .unwrap();
+        assert!(payload.get("tag").is_none(), "{payload}");
+    }
+
     // ── encrypt_payload ──────────────────────────────────────────────────
 
     #[test]
@@ -511,10 +837,10 @@ mod tests {
         // Generate a fresh subscriber keypair; the public key is the
         // 65-byte uncompressed P-256 point.
         let subscriber_secret =
-            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+            p256::ecdsa::SigningKey::try_generate().expect("OS RNG should be available in tests");
         let subscriber_pub_bytes = subscriber_secret
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .to_vec();
         let auth_secret: [u8; 16] = [0xa5; 16];
@@ -540,10 +866,10 @@ mod tests {
     #[test]
     fn encrypt_payload_uses_different_salt_each_call() {
         let subscriber_secret =
-            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+            p256::ecdsa::SigningKey::try_generate().expect("OS RNG should be available in tests");
         let pub_bytes = subscriber_secret
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .to_vec();
         let auth: [u8; 16] = [0xff; 16];

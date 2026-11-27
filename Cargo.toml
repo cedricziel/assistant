@@ -181,7 +181,7 @@ regex-syntax = "0.8"
 getrandom = "0.4"
 # VAPID-signed Web Push dispatch
 # P-256 elliptic curve (for VAPID key generation)
-p256 = { version = "0.13", features = ["arithmetic", "ecdh"] }
+p256 = { version = "0.14", features = ["arithmetic", "ecdh"] }
 aes-gcm = "0.11"
 hkdf = "0.13"
 # Lossless TOML editing (preserves comments and whitespace)

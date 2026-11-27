@@ -824,6 +824,7 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
             role: json['role'] as String? ?? 'assistant',
             content: json['content'] as String? ?? '',
             messageId: json['message_id'] as String?,
+            timing: messageTimingFromJson(json['timing']),
             sequenceId: seq,
           );
         } catch (_) {

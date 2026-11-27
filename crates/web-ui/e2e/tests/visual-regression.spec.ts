@@ -164,6 +164,43 @@ const CATALOG_FIXTURE = [
   },
 ];
 
+/**
+ * Stub `GET /api/tool-permission-rules` so the settings screenshot shows saved
+ * tool approvals without depending on rules stored in the test server.
+ */
+async function mockToolPermissionRules(page: Page, rules: unknown[]) {
+  await page.route(/\/api\/tool-permission-rules(\?.*)?$/, (route) =>
+    route.fulfill({ json: rules }),
+  );
+}
+
+const TOOL_PERMISSION_RULES_FIXTURE = [
+  {
+    id: "rule-1",
+    user_id: "user-1",
+    effect: "allow",
+    rule: "bash(git status*)",
+    tool_name: "bash",
+    created_at: "2026-01-02T09:00:00Z",
+  },
+  {
+    id: "rule-2",
+    user_id: "user-1",
+    effect: "allow",
+    rule: "web-fetch(https://docs.rs/*)",
+    tool_name: "web-fetch",
+    created_at: "2026-01-03T09:00:00Z",
+  },
+  {
+    id: "rule-3",
+    user_id: "user-1",
+    effect: "deny",
+    rule: "bash(rm *)",
+    tool_name: "bash",
+    created_at: "2026-01-04T09:00:00Z",
+  },
+];
+
 // -- Data creation helpers (API-based) --------------------------------------
 
 /** Create a webhook via the REST API and return its id. */
@@ -650,7 +687,11 @@ test.describe("Authenticated pages", () => {
   });
 
   test("settings screen", async ({ page }) => {
+    await mockToolPermissionRules(page, TOOL_PERMISSION_RULES_FIXTURE);
     await navigateAndSettle(page, "/settings");
+    // The section reloads once the space selection resolves, so a second
+    // request reaches the mock. Wait for that as well before the screenshot.
+    await page.waitForTimeout(1_500);
     await expect(page).toHaveScreenshot("settings.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,

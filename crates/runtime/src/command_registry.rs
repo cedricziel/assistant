@@ -275,11 +275,15 @@ impl CommandRegistry {
             .conversation_store()
             .load_history(conversation_id)
             .await?;
+        let surface_actions =
+            crate::history::build_surface_action_map(&storage.surface_store(), conversation_id)
+                .await;
         crate::history::build_turn_history(
             path,
             conversation_id,
             &storage.conversation_summary_store(),
             &Default::default(),
+            &surface_actions,
         )
         .await
     }

@@ -3,6 +3,7 @@ library;
 
 import 'package:assistant_ui/assistant_ui.dart';
 import 'package:assistant_ui/models.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -89,5 +90,27 @@ void main() {
         );
       });
     }
+  }
+
+  for (final brightness in Brightness.values) {
+    testWidgets('timeline_entry_shell_header_focused (${brightness.name})', (
+      tester,
+    ) async {
+      await pumpGolden(
+        tester,
+        _shell(state: EntryState.complete),
+        size: const Size(420, 110),
+        brightness: brightness,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump(const Duration(milliseconds: 250));
+
+      await expectLater(
+        find.byType(MaterialApp),
+        matchesGoldenFile(
+          'goldens/timeline_entry_shell_header_focused_${brightness.name}.png',
+        ),
+      );
+    });
   }
 }

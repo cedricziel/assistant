@@ -2,22 +2,26 @@ import 'package:material_ui/material_ui.dart';
 
 /// Animated three-dot indicator shown while waiting for the first token.
 ///
-/// With `MediaQuery.disableAnimations` the dots stay still.
+/// With `MediaQuery.disableAnimations` the dots stay still and the ticker is
+/// stopped, so the indicator schedules no frames.
 class TypingIndicator extends StatelessWidget {
   const TypingIndicator({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(
-      height: 16,
-      width: 40,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _Dot(),
-          _Dot(delay: Duration(milliseconds: 150)),
-          _Dot(delay: Duration(milliseconds: 300)),
-        ],
+    return Semantics(
+      label: 'typing',
+      child: const SizedBox(
+        height: 16,
+        width: 40,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _Dot(),
+            _Dot(delay: Duration(milliseconds: 150)),
+            _Dot(delay: Duration(milliseconds: 300)),
+          ],
+        ),
       ),
     );
   }
@@ -66,8 +70,18 @@ class _DotState extends State<_Dot> with SingleTickerProviderStateMixin {
         ]).animate(
           CurvedAnimation(parent: _controller, curve: Interval(delay, end)),
         );
+  }
 
-    _controller.repeat();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // A repeating ticker schedules frames forever, so stop it entirely under
+    // reduced motion instead of merely skipping the animated build.
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat();
+    }
   }
 
   @override

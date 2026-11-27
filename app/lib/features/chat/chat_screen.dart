@@ -12,6 +12,7 @@ import '../../api/models/server_capabilities.dart';
 import '../connection/connection_provider.dart';
 import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
+import '../settings/response_timing_preference.dart';
 import 'attachment_provider.dart';
 import 'chat_attachment_picker.dart';
 import 'chat_markdown_config.dart';
@@ -56,6 +57,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _inputController = TextEditingController();
   final _threadController = ThreadViewportController();
   final _inputFocus = FocusNode();
+
+  /// Resolves top-level tool call bodies to their structured result views.
+  /// Built once so the scope's resolver identity stays stable across builds;
+  /// subagent timelines never consult it.
+  final _toolResultRegistry = ToolResultRendererRegistry(
+    byKind: defaultToolResultRenderers(),
+  );
 
   /// Bumped on every `chatProvider` emission so [ThreadViewport] follows
   /// in-place mutations (thinking tokens, tool status flips) that change no
@@ -166,6 +174,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // LayoutBuilder callback below.
     final pendingAttachments = ref.watch(pendingAttachmentsProvider);
     final commands = ref.watch(commandsProvider).value ?? [];
+    final showResponseTiming =
+        ref.watch(showResponseTimingProvider).value ?? false;
 
     // The inline list / drawer decision compares the chat pane's own width
     // (the window minus the nav sidebar), so it sits above the Scaffold,
@@ -260,6 +270,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       commands: commands,
                       inputController: _inputController,
                       inputFocus: _inputFocus,
+                      activePersonaName: activePersonaName,
+                      showResponseTiming: showResponseTiming,
                       showSkip: kSkipButtonEnabled,
                       showVoice: capabilities.voiceSend,
                       voiceButton: VoiceRecorderButton(
@@ -307,6 +319,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         );
       },
     );
-    return ChatMarkdownConfig(child: pane);
+    return ChatMarkdownConfig(
+      child: ToolResultRendererScope(
+        resolve: _toolResultRegistry.build,
+        child: pane,
+      ),
+    );
   }
 }

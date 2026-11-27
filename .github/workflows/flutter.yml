@@ -135,8 +135,14 @@ jobs:
           sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=macosx\*\]" = "Apple Development"/"CODE_SIGN_IDENTITY[sdk=macosx*]" = ""/g' "$PBXPROJ"
           sed -i '' 's/DEVELOPMENT_TEAM = WPW3QSLZ2F/DEVELOPMENT_TEAM = ""/g' "$PBXPROJ"
 
-      - name: Install Rust target
-        run: rustup target add aarch64-apple-darwin
+      # Flutter's build hooks run cargo from the pub cache, where rustup falls
+      # back to the default toolchain. Pin the repository toolchain for the
+      # build and give it both slices a universal macOS build needs, otherwise
+      # the flutter_smooth_markdown hook cannot find `std` for x86_64.
+      - name: Install Rust targets
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          echo "RUSTUP_TOOLCHAIN=$(rustup show active-toolchain | awk '{print $1}')" >> "$GITHUB_ENV"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -164,6 +170,14 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      # flutter_smooth_markdown ships a Rust core that its build hook compiles
+      # for the target platform. The hook runs cargo from the pub cache, where
+      # rustup falls back to the default toolchain, so pin the repository one.
+      - name: Install Rust target
+        run: |
+          rustup target add aarch64-apple-ios
+          echo "RUSTUP_TOOLCHAIN=$(rustup show active-toolchain | awk '{print $1}')" >> "$GITHUB_ENV"
 
       - name: Build iOS (no codesign)
         run: flutter build ios --no-codesign --release

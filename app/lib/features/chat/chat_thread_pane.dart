@@ -31,6 +31,7 @@ class ChatThreadPane extends StatelessWidget {
     required this.commands,
     required this.inputController,
     required this.inputFocus,
+    required this.activePersonaName,
     required this.onSend,
     required this.onStop,
     required this.onPickImage,
@@ -39,6 +40,7 @@ class ChatThreadPane extends StatelessWidget {
     required this.onInteractionAnswer,
     required this.onRetry,
     required this.fetchMessageAudio,
+    this.showResponseTiming = false,
     this.showSkip = true,
     this.showVoice = false,
     this.voiceButton,
@@ -56,6 +58,12 @@ class ChatThreadPane extends StatelessWidget {
   final List<CommandEntry> commands;
   final TextEditingController inputController;
   final FocusNode inputFocus;
+
+  /// The active Persona's name; it labels the assistant's bubbles.
+  final String activePersonaName;
+
+  /// Whether finished replies show their response timing.
+  final bool showResponseTiming;
   final bool showSkip;
   final bool showVoice;
   final Widget? voiceButton;
@@ -145,8 +153,10 @@ class ChatThreadPane extends StatelessWidget {
         !previous.isStreaming;
     return ChatMessageBubbleAdapter(
       message: message,
+      senderLabel: message.isUser ? 'You' : activePersonaName,
       isGrouped: isGrouped,
       capabilities: capabilities,
+      showResponseTiming: showResponseTiming,
       onRetry: message.status == MessageStatus.failed
           ? () => onRetry(message)
           : null,
