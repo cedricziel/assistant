@@ -465,6 +465,8 @@ fn build_vapid_jwt(signing_key: &SigningKey, endpoint: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use p256::elliptic_curve::{Generate as _, sec1::ToSec1Point as _};
+
     use super::*;
 
     #[test]
@@ -603,9 +605,8 @@ mod tests {
         endpoint: &str,
         user_id: Option<&str>,
     ) {
-        let subscriber =
-            p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
-        let p256dh = URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_encoded_point(false));
+        let subscriber = p256::ecdsa::SigningKey::try_generate().unwrap();
+        let p256dh = URL_SAFE_NO_PAD.encode(subscriber.verifying_key().to_sec1_point(false));
         let auth = URL_SAFE_NO_PAD.encode([7u8; 16]);
         store
             .upsert(endpoint, &p256dh, &auth, user_id)
