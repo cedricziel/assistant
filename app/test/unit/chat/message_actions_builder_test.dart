@@ -17,7 +17,7 @@ Widget _wrap(
   VoidCallback? onRetry,
   VoidCallback? onStop,
   bool isStopping = false,
-  Widget? timing,
+  bool showResponseTiming = false,
   Widget? feedback,
   bool isPersisted = false,
   bool turnWorking = false,
@@ -37,7 +37,7 @@ Widget _wrap(
         onRetry: onRetry,
         onStop: onStop,
         isStopping: isStopping,
-        timing: timing,
+        showResponseTiming: showResponseTiming,
         feedback: feedback,
         isPersisted: isPersisted,
         turnWorking: turnWorking,
@@ -67,6 +67,13 @@ const _models = [
   RegenerateModel(name: 'model-b'),
 ];
 
+const _timing = MessageTiming(
+  timeToFirstToken: Duration(milliseconds: 800),
+  total: Duration(milliseconds: 12400),
+  outputTokens: 420,
+  decode: Duration(seconds: 10),
+);
+
 ChatMessage _assistant({
   String id = 'a',
   String content = 'A reply',
@@ -74,6 +81,7 @@ ChatMessage _assistant({
   MessageStatus status = MessageStatus.ok,
   bool isStreaming = false,
   TimelineEntryType timelineType = TimelineEntryType.message,
+  MessageTiming? timing,
 }) => ChatMessage(
   id: id,
   role: 'assistant',
@@ -82,6 +90,7 @@ ChatMessage _assistant({
   isStreaming: isStreaming,
   branch: branch,
   timelineType: timelineType,
+  timing: timing,
 );
 
 double _left(WidgetTester tester, String key) =>
@@ -191,19 +200,67 @@ void main() {
       expect(tester.getSize(find.byType(MessageActions)), Size.zero);
     });
 
-    testWidgets('trailing is timing first, then feedback, after the actions', (
+    testWidgets('with the preference on, timing leads the trailing slot', (
       tester,
     ) async {
       await tester.pumpWidget(
         _wrap(
-          _assistant(),
-          timing: const Text('timing', key: Key('timing')),
+          _assistant(timing: _timing),
+          showResponseTiming: true,
           feedback: const Text('feedback', key: Key('feedback')),
         ),
       );
 
-      expect(_left(tester, 'save_action'), lessThan(_left(tester, 'timing')));
-      expect(_left(tester, 'timing'), lessThan(_left(tester, 'feedback')));
+      expect(find.byType(MessageTimingIndicator), findsOneWidget);
+      expect(
+        _left(tester, 'save_action'),
+        lessThan(tester.getTopLeft(find.byType(MessageTimingIndicator)).dx),
+      );
+      expect(
+        tester.getTopLeft(find.byType(MessageTimingIndicator)).dx,
+        lessThan(_left(tester, 'feedback')),
+      );
+    });
+
+    testWidgets('with the preference off no indicator renders, feedback does', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(timing: _timing),
+          feedback: const Text('feedback', key: Key('feedback')),
+        ),
+      );
+
+      expect(find.byType(MessageTimingIndicator), findsNothing);
+      expect(find.byKey(const Key('feedback')), findsOneWidget);
+    });
+
+    testWidgets('a streaming reply or one without timing shows no indicator', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(timing: _timing, isStreaming: true),
+          showResponseTiming: true,
+          onStop: () {},
+        ),
+      );
+      expect(find.byType(MessageTimingIndicator), findsNothing);
+
+      await tester.pumpWidget(_wrap(_assistant(), showResponseTiming: true));
+      expect(find.byType(MessageTimingIndicator), findsNothing);
+    });
+
+    testWidgets('user messages never show timing', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          ChatMessage(id: 'u', role: 'user', content: 'hi', timing: _timing),
+          showResponseTiming: true,
+        ),
+      );
+
+      expect(find.byType(MessageTimingIndicator), findsNothing);
     });
 
     testWidgets('a stopped assistant message shows Stopped and Copy', (

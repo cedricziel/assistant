@@ -42,6 +42,13 @@ self.addEventListener("push", function (event) {
     },
   };
 
+  // A payload tag makes a later push with the same tag replace this
+  // notification instead of stacking a second one (an unanswered approval
+  // request, for instance). Pushes without a tag keep stacking.
+  if (payload.tag) {
+    options.tag = payload.tag;
+  }
+
   event.waitUntil(self.registration.showNotification(title, options));
 });
 

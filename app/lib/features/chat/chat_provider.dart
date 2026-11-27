@@ -63,6 +63,8 @@ class ChatNotifier extends AsyncNotifier<ChatState>
   }
 
   void _beginLifecycle() {
+    _stallTimer?.cancel();
+    _stallTimer = null;
     _turnInFlight = true;
     _emit((at) => TurnStarted(at: at));
   }
@@ -301,6 +303,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
             event.messageId ??
             'assistant-${DateTime.now().millisecondsSinceEpoch}',
         content: event.content,
+        timing: event.timing,
       ),
     );
     _endLifecycle(
@@ -851,18 +854,188 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     await _streamVoiceMessage(audioBytes, mimeType, conversationId);
   }
 
+  /// Edit user message [messageId] to [text] and stream the reply on the new
+  /// branch.
+  ///
+  /// Truncates the timeline after the message, shows [text] as a sending user
+  /// bubble that keeps the original attachments, and reloads the detail after
+  /// the terminal frame so the server's branch metadata is authoritative.
+  /// Refused while a turn works, unless it only waits for input: the server
+  /// then cancels that wait. [replaceId] addresses the sending bubble of a
+  /// failed edit that has not been persisted yet.
+  Future<void> editMessage(
+    String messageId,
+    String text, {
+    String? replaceId,
+  }) async {
+    await _editTurn(messageId, text, replaceId: replaceId);
+  }
+
+  /// Regenerate the reply to [messageId] (a user message or any reply row) and
+  /// stream it in place, optionally with another [model].
+  ///
+  /// Refused while a turn works, unless it only waits for input.
+  Future<void> regenerate(String messageId, {String? model}) async {
+    await _regenerateTurn(messageId, model: model);
+  }
+
+  /// End the in-flight turn locally. Branch operations replace the timeline its
+  /// stream would reconcile into, so its late terminal frames are dropped.
+  @override
+  void supersedeTurn() {
+    _session.supersede();
+    _stallTimer?.cancel();
+    _stallTimer = null;
+    _turnInFlight = false;
+  }
+
+  Future<_TurnOutcome> _editTurn(
+    String messageId,
+    String text, {
+    String? replaceId,
+  }) async {
+    final api = _api;
+    final current = state.value;
+    final conversationId = current?.conversationId;
+    if (api == null || current == null || conversationId == null) {
+      return _TurnOutcome.refused;
+    }
+    if (!_branchTurnAllowed(current)) return _TurnOutcome.refused;
+    final target = replaceId ?? messageId;
+    final idx = current.messages.indexWhere((m) => m.id == target);
+    if (idx == -1) return _TurnOutcome.refused;
+    final original = current.messages[idx];
+
+    _cancelFollowUps();
+    _session.beginTurn();
+    final tokenController = StreamController<String>.broadcast();
+    _session.openThinking();
+    final userMsgId = 'user-${DateTime.now().millisecondsSinceEpoch}';
+    _session.conversationId = conversationId;
+    _session.userMsgId = userMsgId;
+    _session.editSource = (messageId: messageId, text: text);
+
+    final edited = ChatMessage(
+      id: userMsgId,
+      role: 'user',
+      content: text,
+      status: MessageStatus.sending,
+      attachments: List.of(original.attachments),
+    );
+    final assistantPlaceholder = ChatMessage(
+      id: streamingPlaceholderId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+      tokenStream: tokenController.stream,
+    );
+    state = AsyncData(
+      current.copyWith(
+        messages: [...current.messages.take(idx), edited, assistantPlaceholder],
+        isSending: true,
+        streamingContent: '',
+        clearSuggestions: true,
+        clearError: true,
+      ),
+    );
+    _beginLifecycle();
+
+    return _streamTurn(
+      api: api,
+      conversationId: conversationId,
+      userMsgId: userMsgId,
+      tokenController: tokenController,
+      source: api.streamEdit(conversationId, messageId, text),
+      reloadOnTerminal: true,
+    );
+  }
+
+  Future<_TurnOutcome> _regenerateTurn(
+    String messageId, {
+    String? model,
+  }) async {
+    final api = _api;
+    final current = state.value;
+    final conversationId = current?.conversationId;
+    if (api == null || current == null || conversationId == null) {
+      return _TurnOutcome.refused;
+    }
+    if (!_branchTurnAllowed(current)) return _TurnOutcome.refused;
+    final idx = current.messages.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return _TurnOutcome.refused;
+    final clicked = current.messages[idx];
+    // Keep the user row the reply answers; drop the reply and everything after.
+    final cut = clicked.isUser ? idx + 1 : idx;
+    final userIdx = current.messages
+        .take(cut)
+        .toList()
+        .lastIndexWhere((m) => m.isUser);
+    if (userIdx == -1) return _TurnOutcome.refused;
+    final userMessage = current.messages[userIdx];
+
+    _cancelFollowUps();
+    _session.beginTurn();
+    final tokenController = StreamController<String>.broadcast();
+    _session.openThinking();
+    _session.conversationId = conversationId;
+    _session.userMsgId = userMessage.id;
+    _session.serverUserId = userMessage.id;
+
+    final kept = current.messages.take(cut).toList();
+    kept[userIdx] = kept[userIdx].copyWith(status: MessageStatus.sending);
+    final assistantPlaceholder = ChatMessage(
+      id: streamingPlaceholderId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+      tokenStream: tokenController.stream,
+    );
+    state = AsyncData(
+      current.copyWith(
+        messages: [...kept, assistantPlaceholder],
+        isSending: true,
+        streamingContent: '',
+        clearSuggestions: true,
+        clearError: true,
+      ),
+    );
+    _beginLifecycle();
+
+    return _streamTurn(
+      api: api,
+      conversationId: conversationId,
+      userMsgId: userMessage.id,
+      tokenController: tokenController,
+      source: api.streamRegenerate(conversationId, messageId, model: model),
+      reloadOnTerminal: true,
+    );
+  }
+
   /// Retry a failed message.
   ///
-  /// If a [_session.runId] is available, attempts to reconnect via the event-log
-  /// replay endpoint before re-sending the message.  Falls back to re-sending
-  /// on 404 (unknown run) or 410 (events pruned).
+  /// A failed edit regenerates the edited message's server id and, when that
+  /// returns 404, re-issues the edit of the original message — never a send.
+  /// Any other failed message with a server id replays its run and, when the
+  /// replay does not complete with `done`, regenerates it; a 404 falls back to
+  /// re-sending. Without a server id the text is sent again as before.
   Future<void> retryMessage(ChatMessage msg) async {
     final api = _api;
     final current = state.value ?? const ChatState();
     final conversationId = current.conversationId;
+    if (api == null) return;
 
-    if (api != null && _session.runId != null && conversationId != null) {
-      // Attempt replay before re-sending.
+    final edit = _session.editSource;
+    if (edit != null && msg.id == _session.userMsgId) {
+      if (_session.serverUserId == msg.id && conversationId != null) {
+        final outcome = await _regenerateTurn(msg.id);
+        if (outcome != _TurnOutcome.notFound) return;
+      }
+      await _editTurn(edit.messageId, edit.text, replaceId: msg.id);
+      return;
+    }
+
+    final serverId = _session.serverUserId == msg.id ? msg.id : null;
+    if (_session.runId != null && conversationId != null) {
       final replayed = await _replayRun(
         api,
         conversationId,
@@ -871,6 +1044,10 @@ class ChatNotifier extends AsyncNotifier<ChatState>
         _session.lastSeq,
       );
       if (replayed) return;
+    }
+    if (serverId != null && conversationId != null) {
+      final outcome = await _regenerateTurn(serverId);
+      if (outcome != _TurnOutcome.notFound) return;
     }
 
     // Fallback: remove the failed message and re-enqueue it.
@@ -1192,122 +1369,184 @@ class ChatNotifier extends AsyncNotifier<ChatState>
     );
     _beginLifecycle();
 
-    // Arm the initial-stall watchdog as a per-event timeout on the SSE
-    // stream. Until we see a UI-visible event (anything other than
-    // [RunStartedEvent]), a quiet interval of [ChatStreamSession.initialStallTimeout]
-    // probes the server to disambiguate iOS Dio buffering (server still
-    // running — keep the sink open) from a dead turn (recover via
-    // [_recoverStalledStream]). After progress has been observed, the
-    // byte-level heartbeat (90 s) handles longer silences that may
-    // legitimately occur during tool execution.
+    await _streamTurn(
+      api: api,
+      conversationId: conversationId,
+      userMsgId: userMsgId,
+      tokenController: tokenController,
+      source: api.streamMessages(
+        conversationId,
+        message,
+        attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
+      ),
+    );
+  }
+
+  /// Stream one turn's SSE [source] and reconcile its terminal frame.
+  ///
+  /// Every non-terminal frame goes through [_applyTurnEvent]; a turn whose
+  /// stream ends without a terminal frame keeps what streamed. With
+  /// [reloadOnTerminal], the conversation detail is fetched again after `done`
+  /// or a cancelled `agent_error`, so the server's branch metadata replaces the
+  /// optimistic timeline.
+  Future<_TurnOutcome> _streamTurn({
+    required ApiClient api,
+    required String conversationId,
+    required String userMsgId,
+    required StreamController<String> tokenController,
+    required Stream<StreamEvent> source,
+    bool reloadOnTerminal = false,
+  }) async {
+    final turn = _session.turnSeq;
+    var currentUserId = userMsgId;
     var sawProgress = false;
-    final source = _session.untilDetached(
-      api
-          .streamMessages(
-            conversationId,
-            message,
-            attachmentIds: attachmentIds.isNotEmpty ? attachmentIds : null,
-          )
-          .timeout(
-            ChatStreamSession.initialStallTimeout,
-            onTimeout: (sink) {
-              if (sawProgress) return;
-              unawaited(
-                _probeOrRecover(
-                  conversationId: conversationId,
-                  userMsgId: userMsgId,
-                  sink: sink,
-                  sawProgress: () => sawProgress,
-                ),
-              );
-            },
-          ),
+    final wrapped = _session.untilDetached(
+      source.timeout(
+        ChatStreamSession.initialStallTimeout,
+        onTimeout: (sink) {
+          if (sawProgress) return;
+          unawaited(
+            _probeOrRecover(
+              conversationId: conversationId,
+              userMsgId: currentUserId,
+              sink: sink,
+              sawProgress: () => sawProgress,
+            ),
+          );
+        },
+      ),
     );
 
-    // Stream SSE events.
     try {
-      await for (final event in source) {
-        final chatState = state.value ?? const ChatState();
-
-        if (event is RunStartedEvent) {
-          // Capture the run ID for potential reconnect; don't change UI.
-          _captureRunId(event);
-          // Open the turn-status snapshot used by the progress card.
-          _openTurnStatus(event);
-          continue;
-        }
-        // Any non-RunStartedEvent counts as progress — the initial-stall
-        // watchdog won't fire on subsequent quiet periods.
-        sawProgress = true;
-        if (_applyTurnEvent(chatState, event, tokenSink: tokenController)) {
-          _session.advance(event);
-        } else if (event is DoneEvent) {
-          _session.advance(event);
-          unawaited(tokenController.close());
+      final terminal = await _session.consume(
+        wrapped,
+        turn: turn,
+        onEvent: (event) {
+          if (event is RunStartedEvent) {
+            _captureRunId(event);
+            currentUserId = _adoptUserMessageId(
+              currentUserId,
+              event.userMessageId,
+            );
+            _openTurnStatus(event);
+            return;
+          }
+          sawProgress = true;
+          final chatState = state.value ?? const ChatState();
+          if (_applyTurnEvent(chatState, event, tokenSink: tokenController)) {
+            _session.advance(event);
+          }
+        },
+      );
+      unawaited(tokenController.close());
+      if (!ref.mounted || !_session.isCurrentTurn(turn)) {
+        return _TurnOutcome.superseded;
+      }
+      if (terminal == null) {
+        _finishIncompleteTurn(conversationId, currentUserId);
+        return _TurnOutcome.failed;
+      }
+      _session.advance(terminal);
+      final chatState = state.value ?? const ChatState();
+      switch (terminal) {
+        case DoneEvent done:
           _finishTurn(
             chatState,
-            event,
+            done,
             conversationId: conversationId,
-            userMsgId: userMsgId,
+            userMsgId: currentUserId,
             source: TurnSource.live,
           );
           _startFollowUps(
             api,
-            event,
+            done,
             conversationId: conversationId,
             runId: _session.runId,
           );
-          return;
-        } else if (event is ErrorEvent) {
-          _session.advance(event);
-          unawaited(tokenController.close());
-          _failTurn(chatState, event, userMsgId: userMsgId);
-          return;
-        } else if (event is AgentErrorEvent) {
-          _session.advance(event);
-          unawaited(tokenController.close());
-          _onAgentError(chatState, event, userMsgId: userMsgId);
-          return;
-        }
-      }
-
-      // Stream ended without DoneEvent — close token controller and treat
-      // accumulated buffer as final.
-      unawaited(tokenController.close());
-      if (!ref.mounted) return;
-      _endLifecycle();
-      final finalState = state.value ?? const ChatState();
-      if (finalState.isSending) {
-        final msgs = List<ChatMessage>.from(finalState.messages);
-        final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
-        if (idx != -1) {
-          msgs[idx] = ChatMessage(
-            id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
-            role: 'assistant',
-            content: finalState.streamingContent.isNotEmpty
-                ? finalState.streamingContent
-                : '(incomplete response)',
-          );
-        }
-        // Mark user message as ok — we got at least a partial response.
-        setMessageStatus(msgs, userMsgId, MessageStatus.ok);
-        state = AsyncData(
-          ChatState(
-            conversationId: conversationId,
-            messages: msgs,
-            pendingQueue: finalState.pendingQueue,
-            error: finalState.streamingContent.isEmpty
-                ? 'Response may be incomplete'
-                : null,
-          ),
-        );
+          if (reloadOnTerminal) await _refreshFromServer(conversationId);
+          return _TurnOutcome.done;
+        case AgentErrorEvent error:
+          _onAgentError(chatState, error, userMsgId: currentUserId);
+          if (reloadOnTerminal && error.reason == AgentErrorReason.cancelled) {
+            await _refreshFromServer(conversationId);
+          }
+          return error.reason == AgentErrorReason.cancelled
+              ? _TurnOutcome.cancelled
+              : _TurnOutcome.failed;
+        case ErrorEvent error:
+          _failTurn(chatState, error, userMsgId: currentUserId);
+          return error.isNotFound ? _TurnOutcome.notFound : _TurnOutcome.failed;
+        default:
+          return _TurnOutcome.failed;
       }
     } catch (e) {
       unawaited(tokenController.close());
-      await _handleStreamFailure(api, e, conversationId, userMsgId);
+      if (!_session.isCurrentTurn(turn)) return _TurnOutcome.superseded;
+      await _handleStreamFailure(api, e, conversationId, currentUserId);
+      return _TurnOutcome.failed;
     } finally {
-      _session.cancelStopTimer();
+      if (_session.isCurrentTurn(turn)) _session.cancelStopTimer();
     }
+  }
+
+  /// Keep what streamed when the server closed the stream without a terminal
+  /// frame, and surface an incomplete response as the user message's outcome.
+  void _finishIncompleteTurn(String conversationId, String userMsgId) {
+    if (!ref.mounted) return;
+    _endLifecycle();
+    final finalState = state.value ?? const ChatState();
+    if (!finalState.isSending) return;
+    final msgs = List<ChatMessage>.from(finalState.messages);
+    final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
+    if (idx != -1) {
+      msgs[idx] = ChatMessage(
+        id: 'assistant-${DateTime.now().millisecondsSinceEpoch}',
+        role: 'assistant',
+        content: finalState.streamingContent.isNotEmpty
+            ? finalState.streamingContent
+            : '(incomplete response)',
+      );
+    }
+    // Mark user message as ok — we got at least a partial response.
+    setMessageStatus(msgs, userMsgId, MessageStatus.ok);
+    state = AsyncData(
+      ChatState(
+        conversationId: conversationId,
+        messages: msgs,
+        pendingQueue: finalState.pendingQueue,
+        error: finalState.streamingContent.isEmpty
+            ? 'Response may be incomplete'
+            : null,
+      ),
+    );
+  }
+
+  /// Adopt the server's user-row id for the optimistic bubble [from], so a
+  /// failed turn can be regenerated by its persisted id. Returns the id the
+  /// terminal frame must reconcile.
+  String _adoptUserMessageId(String from, String? serverId) {
+    if (serverId == null || serverId.isEmpty || serverId == from) return from;
+    final current = state.value;
+    if (current != null) {
+      final idx = current.messages.indexWhere((m) => m.id == from);
+      if (idx != -1) {
+        final msgs = List<ChatMessage>.from(current.messages);
+        msgs[idx] = msgs[idx].copyWith(id: serverId);
+        state = AsyncData(current.copyWith(messages: msgs));
+      }
+    }
+    if (_session.userMsgId == from) _session.userMsgId = serverId;
+    _session.serverUserId = serverId;
+    return serverId;
+  }
+
+  /// Whether a branch turn may start: the conversation is idle, or the turn in
+  /// flight only waits for the user, whose pending interaction the server
+  /// cancels when the branch turn arrives.
+  bool _branchTurnAllowed(ChatState state) {
+    if (state.isSwitchingBranch) return false;
+    if (!state.isSending) return true;
+    return state.currentTurnStatus?.awaitingLabel != null;
   }
 
   /// Recover from an exception that ended a turn's event stream.
@@ -1606,6 +1845,27 @@ class ChatNotifier extends AsyncNotifier<ChatState>
       }
     }
   }
+}
+
+/// How a branching turn ended, for [ChatNotifier.retryMessage]'s fallbacks.
+enum _TurnOutcome {
+  /// The server streamed a `done` frame.
+  done,
+
+  /// The turn was cancelled; the reload shows what the server persisted.
+  cancelled,
+
+  /// The turn failed, or its stream ended without a terminal frame.
+  failed,
+
+  /// The request was rejected with 404: the message was never persisted.
+  notFound,
+
+  /// A newer turn took over; this stream must not touch the timeline.
+  superseded,
+
+  /// The turn never started, because a turn works or the target is gone.
+  refused,
 }
 
 /// Provider for [ChatNotifier].

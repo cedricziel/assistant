@@ -21,6 +21,7 @@ pub mod commands;
 pub mod conversations;
 pub mod feedback;
 pub mod integrations;
+pub(crate) mod interaction_push;
 pub mod interactions;
 pub mod interfaces;
 pub mod mcp_apps;

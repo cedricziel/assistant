@@ -42,10 +42,11 @@ bool _showsFeedback(ChatMessage message) =>
 /// Builds the action row shown below a message bubble.
 ///
 /// Decides which actions apply to [message] (Stop, Stopped, Read aloud, Copy,
-/// Share, Save, Retry; [isStopping] keeps Stop visible but disabled) and feeds them to [MessageActions]. [timing] and
-/// [feedback] fill the trailing slot, in that order, once the features that
-/// supply them exist; [trailing] appends the widgets a composed builder such
-/// as [buildMessageTrailing] returns.
+/// Share, Save, Retry; [isStopping] keeps Stop visible but disabled) and feeds
+/// them to [MessageActions]. The response timing indicator (only for finished
+/// replies that have a timing, and only while [showResponseTiming]) comes
+/// first in the trailing slot, then [feedback], then [trailing] from a composed
+/// builder such as [buildMessageTrailing].
 ///
 /// Branching: Edit ([onEdit]) is offered for persisted user messages and
 /// Regenerate ([onRegenerate]) for persisted assistant messages, only while no
@@ -63,7 +64,7 @@ Widget buildMessageActions({
   VoidCallback? onRetry,
   VoidCallback? onStop,
   bool isStopping = false,
-  Widget? timing,
+  bool showResponseTiming = false,
   Widget? feedback,
   List<Widget> trailing = const [],
   bool isPersisted = false,
@@ -76,6 +77,9 @@ Widget buildMessageActions({
 }) {
   final isUser = message.isUser;
   final alignment = isUser ? WrapAlignment.end : WrapAlignment.start;
+  final timing = !isUser && !message.isStreaming && showResponseTiming
+      ? message.timing
+      : null;
 
   if (message.isStreaming) {
     if (onStop == null) return const SizedBox.shrink();
@@ -217,7 +221,11 @@ Widget buildMessageActions({
               onPressed: onRetry,
             ),
         ],
-        trailing: [?timing, ?feedback, ...trailing],
+        trailing: [
+          if (timing != null) MessageTimingIndicator(timing: timing),
+          ?feedback,
+          ...trailing,
+        ],
       );
     },
   );

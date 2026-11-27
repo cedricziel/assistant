@@ -29,6 +29,22 @@ MessageFeedback? _feedbackFromHistory(MessageFeedbackSummary? source) {
   return MessageFeedback(rating: rating, comment: source.comment);
 }
 
+/// Map a persisted timing summary onto [MessageTiming]; absent figures stay
+/// absent.
+MessageTiming? _timingFromHistory(MessageTimingSummary? source) =>
+    source == null
+    ? null
+    : MessageTiming(
+        timeToFirstToken: source.timeToFirstTokenMs == null
+            ? null
+            : Duration(milliseconds: source.timeToFirstTokenMs!),
+        total: Duration(milliseconds: source.totalMs),
+        outputTokens: source.outputTokens,
+        decode: source.decodeMs == null
+            ? null
+            : Duration(milliseconds: source.decodeMs!),
+      );
+
 /// Map a persisted `finish_reason` onto [MessageStatus]: `"cancelled"` is a
 /// reply the user stopped; anything else (including unknown values) is `ok`.
 MessageStatus parseFinishReason(String? reason) {
@@ -99,6 +115,7 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
         status: parseFinishReason(m.finishReason),
         ttsAvailable: m.ttsAvailable,
         parentId: m.parentId,
+        timing: _timingFromHistory(m.timing),
         branch: _branchFromApi(m.branch),
         replyBranch: _branchFromApi(m.replyBranch),
         attachments: attachments

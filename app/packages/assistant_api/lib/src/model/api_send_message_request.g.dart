@@ -11,12 +11,15 @@ class _$ApiSendMessageRequest extends ApiSendMessageRequest {
   final BuiltList<String>? attachmentIds;
   @override
   final String message;
+  @override
+  final SurfaceActionRequest? surfaceAction;
 
   factory _$ApiSendMessageRequest(
           [void Function(ApiSendMessageRequestBuilder)? updates]) =>
       (ApiSendMessageRequestBuilder()..update(updates))._build();
 
-  _$ApiSendMessageRequest._({this.attachmentIds, required this.message})
+  _$ApiSendMessageRequest._(
+      {this.attachmentIds, required this.message, this.surfaceAction})
       : super._();
   @override
   ApiSendMessageRequest rebuild(
@@ -32,7 +35,8 @@ class _$ApiSendMessageRequest extends ApiSendMessageRequest {
     if (identical(other, this)) return true;
     return other is ApiSendMessageRequest &&
         attachmentIds == other.attachmentIds &&
-        message == other.message;
+        message == other.message &&
+        surfaceAction == other.surfaceAction;
   }
 
   @override
@@ -40,6 +44,7 @@ class _$ApiSendMessageRequest extends ApiSendMessageRequest {
     var _$hash = 0;
     _$hash = $jc(_$hash, attachmentIds.hashCode);
     _$hash = $jc(_$hash, message.hashCode);
+    _$hash = $jc(_$hash, surfaceAction.hashCode);
     _$hash = $jf(_$hash);
     return _$hash;
   }
@@ -48,7 +53,8 @@ class _$ApiSendMessageRequest extends ApiSendMessageRequest {
   String toString() {
     return (newBuiltValueToStringHelper(r'ApiSendMessageRequest')
           ..add('attachmentIds', attachmentIds)
-          ..add('message', message))
+          ..add('message', message)
+          ..add('surfaceAction', surfaceAction))
         .toString();
   }
 }
@@ -67,6 +73,12 @@ class ApiSendMessageRequestBuilder
   String? get message => _$this._message;
   set message(String? message) => _$this._message = message;
 
+  SurfaceActionRequestBuilder? _surfaceAction;
+  SurfaceActionRequestBuilder get surfaceAction =>
+      _$this._surfaceAction ??= SurfaceActionRequestBuilder();
+  set surfaceAction(SurfaceActionRequestBuilder? surfaceAction) =>
+      _$this._surfaceAction = surfaceAction;
+
   ApiSendMessageRequestBuilder() {
     ApiSendMessageRequest._defaults(this);
   }
@@ -76,6 +88,7 @@ class ApiSendMessageRequestBuilder
     if ($v != null) {
       _attachmentIds = $v.attachmentIds?.toBuilder();
       _message = $v.message;
+      _surfaceAction = $v.surfaceAction?.toBuilder();
       _$v = null;
     }
     return this;
@@ -102,12 +115,16 @@ class ApiSendMessageRequestBuilder
             attachmentIds: _attachmentIds?.build(),
             message: BuiltValueNullFieldError.checkNotNull(
                 message, r'ApiSendMessageRequest', 'message'),
+            surfaceAction: _surfaceAction?.build(),
           );
     } catch (_) {
       late String _$failedField;
       try {
         _$failedField = 'attachmentIds';
         _attachmentIds?.build();
+
+        _$failedField = 'surfaceAction';
+        _surfaceAction?.build();
       } catch (e) {
         throw BuiltValueNestedFieldError(
             r'ApiSendMessageRequest', _$failedField, e.toString());
