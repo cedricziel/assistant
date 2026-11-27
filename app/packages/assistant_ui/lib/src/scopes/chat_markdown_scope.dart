@@ -11,13 +11,14 @@ typedef ChatMarkdownImageBuilder = Widget Function(
 );
 
 /// Supplies the markdown configuration of a thread to every body below it:
-/// parser [plugins], widget [builders], the [imageBuilder], link taps and a
-/// style sheet override.
+/// parser [plugins], widget [builders], the [imageBuilder], link taps, code
+/// copy and a style sheet override.
 ///
 /// The package does no I/O, so the app registers whatever does: a launcher for
-/// [onTapLink], network images in [imageBuilder], and plugins such as Mermaid
-/// or SVG. Without an ancestor scope, [of] returns `null`: no plugins, links
-/// ignored, and images render [markdownImagePlaceholder] (see [imageBuilderOf]).
+/// [onTapLink], network images in [imageBuilder], a clipboard writer in
+/// [onCopyCode], and plugins such as Mermaid or SVG. Without an ancestor scope,
+/// [of] returns `null`: no plugins, links ignored, code blocks hide their copy
+/// button, and images render [markdownImagePlaceholder] (see [imageBuilderOf]).
 ///
 /// A body that renders markdown reads the pieces it applies. `ThinkingBody`
 /// applies only [onTapLink] and [imageBuilder]: reasoning has no diagrams.
@@ -28,6 +29,7 @@ class ChatMarkdownScope extends InheritedWidget {
     this.builders,
     this.imageBuilder,
     this.onTapLink,
+    this.onCopyCode,
     this.styleSheetOverride,
     required super.child,
   });
@@ -44,6 +46,10 @@ class ChatMarkdownScope extends InheritedWidget {
 
   /// Called with the URL of a tapped link. `null` ignores link taps.
   final void Function(String url)? onTapLink;
+
+  /// Called with the code of a code block when its copy button is activated.
+  /// `null` hides the button.
+  final ValueChanged<String>? onCopyCode;
 
   /// Replaces the theme-derived style sheet of message markdown. `null` keeps
   /// the theme's.
@@ -66,6 +72,7 @@ class ChatMarkdownScope extends InheritedWidget {
       builders != oldWidget.builders ||
       imageBuilder != oldWidget.imageBuilder ||
       onTapLink != oldWidget.onTapLink ||
+      onCopyCode != oldWidget.onCopyCode ||
       styleSheetOverride != oldWidget.styleSheetOverride;
 }
 
