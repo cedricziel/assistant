@@ -44,6 +44,13 @@ pub trait PushSubscriptionStore: Send + Sync {
 
     /// Return the subscriptions that belong to `user_id`, oldest first.
     async fn list_for_user(&self, user_id: &str) -> Result<Vec<PushSubscription>>;
+
+    /// Return the subscription currently stored at `endpoint`, if any.
+    ///
+    /// Senders recheck this immediately before delivering a user-scoped push:
+    /// `upsert` can rebind an endpoint to another user after the send took its
+    /// snapshot.
+    async fn get_by_endpoint(&self, endpoint: &str) -> Result<Option<PushSubscription>>;
 }
 
 /// SQLite-backed store for PWA push subscriptions.
@@ -121,6 +128,17 @@ impl PushSubscriptionStore for SqlitePushSubscriptionStore {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.iter().map(subscription_from_row).collect())
+    }
+
+    async fn get_by_endpoint(&self, endpoint: &str) -> Result<Option<PushSubscription>> {
+        let row = sqlx::query(
+            "SELECT id, endpoint, p256dh, auth, user_id, created_at FROM push_subscriptions \
+             WHERE endpoint = ?1",
+        )
+        .bind(endpoint)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(subscription_from_row))
     }
 }
 
@@ -230,6 +248,14 @@ impl PushSubscriptionStore for InMemoryPushSubscriptionStore {
         let mut subs = self.list_all().await?;
         subs.retain(|s| s.user_id.as_deref() == Some(user_id));
         Ok(subs)
+    }
+
+    async fn get_by_endpoint(&self, endpoint: &str) -> Result<Option<PushSubscription>> {
+        let state = match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        Ok(state.by_endpoint.get(endpoint).cloned())
     }
 }
 

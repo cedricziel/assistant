@@ -165,11 +165,13 @@ impl PushDispatcher {
             conversation_id,
             tag: None,
         };
-        self.deliver(store, &subscriptions, &message).await
+        self.deliver(store, &subscriptions, &message, None).await
     }
 
     /// Send a push notification to the subscriptions of `user_id` only.
-    /// Subscriptions stored without a user never match.
+    /// Subscriptions stored without a user never match. The owner is rechecked
+    /// immediately before each send, because `upsert` can rebind an endpoint to
+    /// another user on a shared browser after the snapshot above.
     ///
     /// Subscriptions that respond with `410 Gone` are deleted from `store`.
     pub async fn send_to_user(
@@ -179,14 +181,19 @@ impl PushDispatcher {
         message: &PushMessage<'_>,
     ) -> Result<()> {
         let subscriptions = store.list_for_user(user_id).await?;
-        self.deliver(store, &subscriptions, message).await
+        self.deliver(store, &subscriptions, message, Some(user_id))
+            .await
     }
 
+    /// Deliver `message` to `subscriptions`. With `owner`, each subscription's
+    /// current owner is rechecked just before its send and skipped when the
+    /// row is gone or now belongs to someone else.
     async fn deliver(
         &self,
         store: &dyn PushSubscriptionStore,
         subscriptions: &[assistant_storage::PushSubscription],
         message: &PushMessage<'_>,
+        owner: Option<&str>,
     ) -> Result<()> {
         if subscriptions.is_empty() {
             return Ok(());
@@ -196,6 +203,26 @@ impl PushDispatcher {
         let payload = message.payload();
 
         for sub in subscriptions {
+            if let Some(owner) = owner {
+                match store.get_by_endpoint(&sub.endpoint).await {
+                    Ok(Some(current)) if current.user_id.as_deref() == Some(owner) => {}
+                    Ok(_) => {
+                        warn!(
+                            "Skipping push to {}: it no longer belongs to {owner}",
+                            sub.endpoint
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Skipping push to {}: could not recheck its owner: {e}",
+                            sub.endpoint
+                        );
+                        continue;
+                    }
+                }
+            }
+
             match send_one(
                 &self.client,
                 &signing_key,
@@ -516,6 +543,12 @@ mod tests {
             self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(vec![])
         }
+        async fn get_by_endpoint(
+            &self,
+            _endpoint: &str,
+        ) -> Result<Option<assistant_storage::PushSubscription>> {
+            Ok(None)
+        }
     }
 
     #[tokio::test]
@@ -633,6 +666,139 @@ mod tests {
             paths,
             ["/alice-laptop", "/alice-phone"],
             "one push per endpoint of the owner, none to other members or to rows without a user"
+        );
+    }
+
+    /// A store whose `list_for_user` snapshot is stale: the endpoint has been
+    /// rebound to another user (or deleted) before the send happens.
+    struct ReboundStore {
+        snapshot: Vec<assistant_storage::PushSubscription>,
+        current: Option<assistant_storage::PushSubscription>,
+    }
+
+    #[async_trait::async_trait]
+    impl PushSubscriptionStore for ReboundStore {
+        async fn upsert(
+            &self,
+            _endpoint: &str,
+            _p256dh: &str,
+            _auth: &str,
+            _user_id: Option<&str>,
+        ) -> Result<()> {
+            Ok(())
+        }
+        async fn delete(&self, _endpoint: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn list_all(&self) -> Result<Vec<assistant_storage::PushSubscription>> {
+            Ok(self.snapshot.clone())
+        }
+        async fn list_for_user(
+            &self,
+            _user_id: &str,
+        ) -> Result<Vec<assistant_storage::PushSubscription>> {
+            Ok(self.snapshot.clone())
+        }
+        async fn get_by_endpoint(
+            &self,
+            _endpoint: &str,
+        ) -> Result<Option<assistant_storage::PushSubscription>> {
+            Ok(self.current.clone())
+        }
+    }
+
+    fn subscription(endpoint: &str, user_id: &str) -> assistant_storage::PushSubscription {
+        assistant_storage::PushSubscription {
+            id: 1,
+            endpoint: endpoint.to_string(),
+            p256dh: "unused".into(),
+            auth: "unused".into(),
+            user_id: Some(user_id.into()),
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_rebound_endpoint_does_not_get_the_previous_owners_push() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+        let endpoint = format!("{}/shared-browser", server.uri());
+        let store = ReboundStore {
+            snapshot: vec![subscription(&endpoint, "alice")],
+            // Another user rebound the same browser after the snapshot.
+            current: Some(subscription(&endpoint, "bob")),
+        };
+        let (vapid_private, _) = generate_vapid_keypair().unwrap();
+        let dispatcher = PushDispatcher::new(vapid_private);
+
+        dispatcher
+            .send_to_user(
+                &store,
+                "alice",
+                &PushMessage {
+                    title: "Approval needed",
+                    body: "body",
+                    conversation_id: Some("conv-1"),
+                    tag: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty(),
+            "the endpoint belongs to bob now, so alice's push must not be sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_deleted_endpoint_does_not_get_the_previous_owners_push() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+        let endpoint = format!("{}/gone", server.uri());
+        let store = ReboundStore {
+            snapshot: vec![subscription(&endpoint, "alice")],
+            current: None,
+        };
+        let (vapid_private, _) = generate_vapid_keypair().unwrap();
+        let dispatcher = PushDispatcher::new(vapid_private);
+
+        dispatcher
+            .send_to_user(
+                &store,
+                "alice",
+                &PushMessage {
+                    title: "Approval needed",
+                    body: "body",
+                    conversation_id: Some("conv-1"),
+                    tag: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty()
         );
     }
 

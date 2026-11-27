@@ -101,6 +101,40 @@ async fn resubscribing_moves_the_endpoint_to_the_new_user(store: Box<dyn PushSub
     assert_eq!(store.list_for_user("bob").await.unwrap().len(), 1);
 }
 
+async fn get_by_endpoint_returns_the_current_owner(store: Box<dyn PushSubscriptionStore>) {
+    store
+        .upsert("https://push.example.com/get", "k", "a", Some("alice"))
+        .await
+        .unwrap();
+
+    let sub = store
+        .get_by_endpoint("https://push.example.com/get")
+        .await
+        .unwrap()
+        .expect("the stored row");
+    assert_eq!(sub.user_id.as_deref(), Some("alice"));
+
+    // A rebind is visible immediately: this is what send-time rechecks read.
+    store
+        .upsert("https://push.example.com/get", "k", "a", Some("bob"))
+        .await
+        .unwrap();
+    let sub = store
+        .get_by_endpoint("https://push.example.com/get")
+        .await
+        .unwrap()
+        .expect("the rebound row");
+    assert_eq!(sub.user_id.as_deref(), Some("bob"));
+
+    assert!(
+        store
+            .get_by_endpoint("https://push.example.com/missing")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
 macro_rules! contract_tests {
     ($name:ident, $ctor:expr) => {
         mod $name {
@@ -129,6 +163,11 @@ macro_rules! contract_tests {
             #[tokio::test]
             async fn t_resubscribing_moves_the_endpoint_to_the_new_user() {
                 resubscribing_moves_the_endpoint_to_the_new_user($ctor).await;
+            }
+
+            #[tokio::test]
+            async fn t_get_by_endpoint_returns_the_current_owner() {
+                get_by_endpoint_returns_the_current_owner($ctor).await;
             }
 
             #[tokio::test]
