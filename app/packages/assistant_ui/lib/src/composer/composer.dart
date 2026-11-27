@@ -251,13 +251,14 @@ class _ComposerState extends State<Composer> {
                 IconButton.filled(
                   key: const Key('stop_button'),
                   onPressed: widget.isStopping ? null : widget.onStop,
-                  tooltip: widget.isStopping ? 'Stopping…' : null,
+                  tooltip: widget.isStopping ? 'Stopping…' : 'Stop response',
                   icon: const Icon(Icons.stop_rounded),
                 )
               else
                 IconButton.filled(
                   key: const Key('send_button'),
                   onPressed: widget.onSend,
+                  tooltip: 'Send message',
                   icon: const Icon(Icons.send),
                 ),
             ],

@@ -33,6 +33,9 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Golden failure artifacts (diffs written by failing golden tests)
+**/test/**/failures/
+
 # Symbolication related
 app.*.symbols
 

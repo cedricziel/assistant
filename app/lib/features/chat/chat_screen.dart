@@ -351,6 +351,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ? null
                 : Builder(
                     builder: (ctx) => IconButton(
+                      tooltip: 'Open conversations',
                       icon: const AdaptiveIcon(
                         cupertino: CupertinoIcons.line_horizontal_3,
                         material: Icons.menu,

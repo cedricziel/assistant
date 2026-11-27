@@ -48,5 +48,31 @@ void main() {
       );
       expect(material.color, scheme.errorContainer);
     });
+
+    testWidgets('the dismiss button is labelled "Dismiss error"', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await _pump(tester);
+
+      expect(
+        tester.widget<IconButton>(find.byType(IconButton)).tooltip,
+        'Dismiss error',
+      );
+      handle.dispose();
+    });
+
+    testWidgets('the banner is a live region', (tester) async {
+      final handle = tester.ensureSemantics();
+      await _pump(tester, message: 'Rate limited');
+
+      final node = tester.getSemantics(find.byType(ThreadErrorBanner));
+      expect(
+        node.flagsCollection.isLiveRegion,
+        isTrue,
+        reason: 'an error that appears is announced by assistive tech',
+      );
+      handle.dispose();
+    });
   });
 }

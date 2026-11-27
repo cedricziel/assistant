@@ -14,6 +14,11 @@ final Uint8List _png = base64Decode(
 
 Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
+String _name(WidgetTester tester, Finder finder) {
+  final node = tester.getSemantics(finder);
+  return node.label.isNotEmpty ? node.label : node.tooltip;
+}
+
 void main() {
   final attachments = [
     PendingAttachment(
@@ -83,5 +88,76 @@ void main() {
 
     expect(find.text('a.csv'), findsOneWidget);
     expect(find.byIcon(Icons.table_chart), findsOneWidget);
+  });
+
+  group('accessibility', () {
+    testWidgets('each remove control is labelled "Remove {filename}"', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        _host(AttachmentTray(attachments: attachments, onRemove: (_) {})),
+      );
+
+      expect(
+        _name(tester, find.byKey(const Key('remove_attachment_0'))),
+        'Remove photo.png',
+      );
+      expect(
+        _name(tester, find.byKey(const Key('remove_attachment_1'))),
+        'Remove quarterly-report.pdf',
+      );
+      handle.dispose();
+    });
+
+    testWidgets(
+      'the remove hit area is at least 24x24, inside its 64 px tile, and '
+      'taps 1 px inside each edge fire onRemove',
+      (tester) async {
+        final removed = <int>[];
+        await tester.pumpWidget(
+          _host(
+            AttachmentTray(
+              attachments: [attachments.first],
+              onRemove: removed.add,
+            ),
+          ),
+        );
+
+        final tile = tester.getRect(find.byType(Image));
+        final hit = tester.getRect(
+          find.byKey(const Key('remove_attachment_0')),
+        );
+
+        expect(tile.size, const Size(64, 64));
+        expect(hit.width, greaterThanOrEqualTo(24));
+        expect(hit.height, greaterThanOrEqualTo(24));
+        expect(
+          hit.left >= tile.left &&
+              hit.top >= tile.top &&
+              hit.right <= tile.right &&
+              hit.bottom <= tile.bottom,
+          isTrue,
+          reason: 'the hit area $hit lies within the tile $tile',
+        );
+
+        final taps = [
+          Offset(hit.center.dx, hit.top + 1),
+          Offset(hit.center.dx, hit.bottom - 1),
+          Offset(hit.left + 1, hit.center.dy),
+          Offset(hit.right - 1, hit.center.dy),
+        ];
+        for (final point in taps) {
+          await tester.tapAt(point);
+          await tester.pump();
+        }
+        expect(removed, [
+          0,
+          0,
+          0,
+          0,
+        ], reason: 'every edge tap hits the control');
+      },
+    );
   });
 }
