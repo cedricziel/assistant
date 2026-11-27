@@ -97,6 +97,42 @@ void main() {
       );
     });
 
+    test('DoneEvent parses timing from JSON', () async {
+      const raw =
+          'event: done\n'
+          'data: {"role":"assistant","content":"ok","message_id":"abc-123",'
+          '"timing":{"time_to_first_token_ms":800,"total_ms":3000,'
+          '"output_tokens":120,"decode_ms":2200}}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      final timing = (events.first as DoneEvent).timing;
+      expect(
+        timing?.timeToFirstToken,
+        const Duration(milliseconds: 800),
+        reason: 'time_to_first_token_ms maps to MessageTiming.timeToFirstToken',
+      );
+      expect(timing?.total, const Duration(milliseconds: 3000));
+      expect(timing?.outputTokens, 120);
+      expect(timing?.decode, const Duration(milliseconds: 2200));
+    });
+
+    test('DoneEvent timing is null without a timing field', () async {
+      final events = await parseSseByteStream(_uint8Stream(doneEvent)).toList();
+      expect((events.first as DoneEvent).timing, isNull);
+    });
+
+    test('a malformed timing does not drop the done event', () async {
+      const raw =
+          'event: done\n'
+          'data: {"role":"assistant","content":"ok",'
+          '"timing":{"total_ms":"fast"}}\n\n';
+      final events = await parseSseByteStream(_uint8Stream(raw)).toList();
+      expect(events, hasLength(1));
+      final done = events.first as DoneEvent;
+      expect(done.content, 'ok');
+      expect(done.timing, isNull, reason: 'malformed timing is ignored');
+    });
+
     test('DoneEvent falls back when data is not valid JSON', () async {
       const raw = 'event: done\ndata: not-json\n\n';
       final events = await parseSseByteStream(_uint8Stream(raw)).toList();

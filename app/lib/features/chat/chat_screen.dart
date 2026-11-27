@@ -19,6 +19,7 @@ import '../../api/models/server_capabilities.dart';
 import '../connection/connection_provider.dart';
 import '../personas/persona_picker.dart';
 import '../personas/personas_provider.dart';
+import '../settings/response_timing_preference.dart';
 import 'attachment_provider.dart';
 import 'chat_announcer.dart';
 import 'chat_empty_starters.dart';
@@ -335,6 +336,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // LayoutBuilder callback below.
     final pendingAttachments = ref.watch(pendingAttachmentsProvider);
     final commands = ref.watch(commandsProvider).value ?? [];
+    final showResponseTiming =
+        ref.watch(showResponseTimingProvider).value ?? false;
 
     // The inline list / drawer decision compares the chat pane's own width
     // (the window minus the nav sidebar), so it sits above the Scaffold,
@@ -511,6 +514,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                               .retryMessage(msg)
                                         : null,
                                     isStopping: chatState.isStopping,
+                                    showResponseTiming: showResponseTiming,
                                     onStop: () => ref
                                         .read(chatProvider.notifier)
                                         .stopTurn(),

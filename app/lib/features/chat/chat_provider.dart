@@ -293,6 +293,7 @@ class ChatNotifier extends AsyncNotifier<ChatState>
             event.messageId ??
             'assistant-${DateTime.now().millisecondsSinceEpoch}',
         content: event.content,
+        timing: event.timing,
       ),
     );
     _endLifecycle(
