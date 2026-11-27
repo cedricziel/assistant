@@ -8,16 +8,19 @@ class TypingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(
-      height: 16,
-      width: 40,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _Dot(),
-          _Dot(delay: Duration(milliseconds: 150)),
-          _Dot(delay: Duration(milliseconds: 300)),
-        ],
+    return Semantics(
+      label: 'typing',
+      child: const SizedBox(
+        height: 16,
+        width: 40,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _Dot(),
+            _Dot(delay: Duration(milliseconds: 150)),
+            _Dot(delay: Duration(milliseconds: 300)),
+          ],
+        ),
       ),
     );
   }

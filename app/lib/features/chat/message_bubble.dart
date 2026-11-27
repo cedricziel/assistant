@@ -23,6 +23,7 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   const ChatMessageBubbleAdapter({
     super.key,
     required this.message,
+    required this.senderLabel,
     required this.capabilities,
     required this.fetchMessageAudio,
     this.isGrouped = false,
@@ -34,6 +35,10 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   });
 
   final ChatMessage message;
+
+  /// Who the bubble speaks for: "You" for the user's own messages and the
+  /// active Persona's name for assistant messages.
+  final String senderLabel;
   final bool isGrouped;
   final VoidCallback? onRetry;
   final VoidCallback? onStop;
@@ -48,6 +53,7 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   Widget build(BuildContext context) {
     return MessageBubble(
       message: message,
+      senderLabel: senderLabel,
       isGrouped: isGrouped,
       attachments: message.attachments.isEmpty
           ? null
