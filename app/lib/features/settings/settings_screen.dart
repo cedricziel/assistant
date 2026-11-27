@@ -7,6 +7,7 @@ import '../../shared/platform/widgets.dart';
 import '../notifications/notification_preferences.dart';
 import '../notifications/notification_service.dart';
 import 'response_timing_preference.dart';
+import 'tool_approvals_section.dart';
 
 /// Application settings screen.
 class SettingsScreen extends ConsumerWidget {
@@ -159,6 +160,7 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
+          const SliverToBoxAdapter(child: ToolApprovalsSection()),
         ],
       ),
     );

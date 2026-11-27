@@ -67,8 +67,17 @@ impl RenderSurfaceHandler {
             .await;
         match validate(&draft, &self.url_policy(owned)) {
             Ok(valid) => match serde_json::to_value(valid.draft()) {
-                Ok(surface) => ToolOutput::success("Surface validated.")
-                    .with_data(json!({ "surface": surface })),
+                Ok(surface) => {
+                    // Only `create` waits. The runtime holds the turn on the
+                    // surface's interaction when the flag is set.
+                    let mut data = json!({ "surface": surface });
+                    if params.get("wait_for_action") == Some(&Value::Bool(true))
+                        && let Some(map) = data.as_object_mut()
+                    {
+                        map.insert("wait_for_action".into(), Value::Bool(true));
+                    }
+                    ToolOutput::success("Surface validated.").with_data(data)
+                }
                 Err(e) => ToolOutput::error(format!("render-surface: cannot encode surface: {e}")),
             },
             Err(issues) => issues_output(&issues),
@@ -356,6 +365,33 @@ mod tests {
             Some(2)
         );
         assert_eq!(data["surface"]["send_data_model"], true, "defaults to true");
+    }
+
+    #[tokio::test]
+    async fn create_passes_wait_for_action_on_to_the_runtime() {
+        let wait = |flag: Option<bool>| {
+            let mut p = text_surface();
+            if let Some(flag) = flag {
+                p["wait_for_action"] = json!(flag);
+            }
+            p
+        };
+        for (flag, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
+            let out = plain()
+                .run(params(wait(flag)), &web_ctx(Uuid::new_v4()))
+                .await
+                .expect("run");
+            let data = out.data.expect("data");
+            assert_eq!(
+                data["wait_for_action"] == json!(true),
+                expected,
+                "wait_for_action {flag:?}: {data}"
+            );
+            assert!(
+                data["surface"].get("wait_for_action").is_none(),
+                "the flag is not part of the surface"
+            );
+        }
     }
 
     #[tokio::test]

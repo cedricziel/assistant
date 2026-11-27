@@ -82,7 +82,7 @@ void main() {
     await _golden(
       tester,
       'message_bubble_user',
-      MessageBubble(message: _user('Hello there')),
+      MessageBubble(senderLabel: 'You', message: _user('Hello there')),
     );
   });
 
@@ -90,7 +90,7 @@ void main() {
     await _golden(
       tester,
       'message_bubble_user_dark',
-      MessageBubble(message: _user('Hello there')),
+      MessageBubble(senderLabel: 'You', message: _user('Hello there')),
       brightness: Brightness.dark,
     );
   });
@@ -100,6 +100,7 @@ void main() {
       tester,
       'message_bubble_user_attachment',
       MessageBubble(
+        senderLabel: 'You',
         message: _user('See attached'),
         attachments: _slot('chart.png'),
       ),
@@ -111,6 +112,7 @@ void main() {
       tester,
       'message_bubble_user_voice',
       MessageBubble(
+        senderLabel: 'You',
         message: _user('Remind me to call Sam'),
         audio: _slot('voice message'),
       ),
@@ -121,7 +123,11 @@ void main() {
     await _golden(
       tester,
       'message_bubble_assistant',
-      MessageBubble(message: _assistant(_markdown), actions: _actions()),
+      MessageBubble(
+        senderLabel: 'Ada',
+        message: _assistant(_markdown),
+        actions: _actions(),
+      ),
       size: const Size(420, 360),
     );
   });
@@ -130,7 +136,11 @@ void main() {
     await _golden(
       tester,
       'message_bubble_assistant_dark',
-      MessageBubble(message: _assistant(_markdown), actions: _actions()),
+      MessageBubble(
+        senderLabel: 'Ada',
+        message: _assistant(_markdown),
+        actions: _actions(),
+      ),
       size: const Size(420, 360),
       brightness: Brightness.dark,
     );
@@ -143,8 +153,12 @@ void main() {
       Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          MessageBubble(message: _assistant('First part of the reply.')),
           MessageBubble(
+            senderLabel: 'Ada',
+            message: _assistant('First part of the reply.'),
+          ),
+          MessageBubble(
+            senderLabel: 'Ada',
             message: _assistant('Second part, grouped.'),
             isGrouped: true,
           ),
@@ -158,6 +172,7 @@ void main() {
       tester,
       'message_bubble_failed',
       MessageBubble(
+        senderLabel: 'You',
         message: _user('This did not send', status: MessageStatus.failed),
       ),
     );
@@ -167,7 +182,10 @@ void main() {
     await _golden(
       tester,
       'message_bubble_streaming_empty',
-      MessageBubble(message: _assistant('', isStreaming: true)),
+      MessageBubble(
+        senderLabel: 'Ada',
+        message: _assistant('', isStreaming: true),
+      ),
       size: const Size(420, 100),
     );
   });
@@ -177,6 +195,7 @@ void main() {
       tester,
       'message_bubble_extension',
       MessageBubble(
+        senderLabel: 'Ada',
         message: _assistant('Here is a card.'),
         extensions: [_slot('generative UI surface')],
       ),

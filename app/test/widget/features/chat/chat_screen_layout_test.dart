@@ -118,6 +118,18 @@ void main() {
       expect(_menuButton, findsOneWidget);
     });
 
+    testWidgets('the drawer menu button is labelled "Open conversations"', (
+      tester,
+    ) async {
+      await _pump(tester, width: 900);
+
+      final button = find.ancestor(
+        of: _menuButton,
+        matching: find.byType(IconButton),
+      );
+      expect(tester.widget<IconButton>(button).tooltip, 'Open conversations');
+    });
+
     testWidgets('840 px with the collapsed sidebar: drawer (pane 767)', (
       tester,
     ) async {

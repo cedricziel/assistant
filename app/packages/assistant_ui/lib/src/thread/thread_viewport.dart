@@ -104,19 +104,26 @@ class _ThreadViewportState extends State<ThreadViewport> {
     SchedulerBinding.instance.ensureVisualUpdate();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
-      _animateToEnd();
+      _scrollToEnd();
     });
   }
 
   void _scrollToBottomIfNear() {
     if (!_scrollController.hasClients) return;
     final pos = _scrollController.position;
-    if (pos.maxScrollExtent - pos.pixels < _kNearThreshold) _animateToEnd();
+    if (pos.maxScrollExtent - pos.pixels < _kNearThreshold) _scrollToEnd();
   }
 
-  void _animateToEnd() {
+  /// Scrolls to the end, animating unless the platform asks for reduced
+  /// motion, in which case it jumps so a single frame lands at the bottom.
+  void _scrollToEnd() {
+    final position = _scrollController.position;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _scrollController.jumpTo(position.maxScrollExtent);
+      return;
+    }
     _scrollController.animateTo(
-      _scrollController.position.maxScrollExtent,
+      position.maxScrollExtent,
       duration: _kScrollDuration,
       curve: Curves.easeOut,
     );

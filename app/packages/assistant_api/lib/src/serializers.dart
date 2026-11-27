@@ -104,6 +104,7 @@ import 'package:assistant_api/src/model/message_search_match.dart';
 import 'package:assistant_api/src/model/message_summary.dart';
 import 'package:assistant_api/src/model/message_timing_summary.dart';
 import 'package:assistant_api/src/model/model_part.dart';
+import 'package:assistant_api/src/model/model_summary.dart';
 import 'package:assistant_api/src/model/mutual_tls_security_scheme.dart';
 import 'package:assistant_api/src/model/o_auth2_security_scheme.dart';
 import 'package:assistant_api/src/model/o_auth_error_response.dart';
@@ -128,11 +129,13 @@ import 'package:assistant_api/src/model/question_answer.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
 import 'package:assistant_api/src/model/read_mcp_app_resource_request.dart';
+import 'package:assistant_api/src/model/regenerate_message_request.dart';
 import 'package:assistant_api/src/model/register_agent_request.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of1.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of3.dart';
 import 'package:assistant_api/src/model/role.dart';
 import 'package:assistant_api/src/model/rotate_secret_response.dart';
 import 'package:assistant_api/src/model/rule_scope.dart';
@@ -175,6 +178,7 @@ import 'package:assistant_api/src/model/stream_run_events_query.dart';
 import 'package:assistant_api/src/model/string_list.dart';
 import 'package:assistant_api/src/model/subscribe_request.dart';
 import 'package:assistant_api/src/model/subscription_response.dart';
+import 'package:assistant_api/src/model/surface_action_request.dart';
 import 'package:assistant_api/src/model/surface_summary.dart';
 import 'package:assistant_api/src/model/switch_branch_request.dart';
 import 'package:assistant_api/src/model/task.dart';
@@ -315,6 +319,7 @@ part 'serializers.g.dart';
   MessageSummary,
   MessageTimingSummary,
   ModelPart,
+  ModelSummary,
   MutualTlsSecurityScheme,
   OAuth2SecurityScheme,
   OAuthErrorResponse,
@@ -339,11 +344,13 @@ part 'serializers.g.dart';
   QuickMessageRequest,
   QuickMessageResponse,
   ReadMcpAppResourceRequest,
+  RegenerateMessageRequest,
   RegisterAgentRequest,
   RespondToInteractionRequest,
   RespondToInteractionRequestOneOf,
   RespondToInteractionRequestOneOf1,
   RespondToInteractionRequestOneOf2,
+  RespondToInteractionRequestOneOf3,
   Role,
   RotateSecretResponse,
   RuleScope,
@@ -386,6 +393,7 @@ part 'serializers.g.dart';
   StringList,
   SubscribeRequest,
   SubscriptionResponse,
+  SurfaceActionRequest,
   SurfaceSummary,
   SwitchBranchRequest,
   Task,
@@ -435,10 +443,6 @@ part 'serializers.g.dart';
 ])
 Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(ConversationSummary)]),
-        () => ListBuilder<ConversationSummary>(),
-      )
-      ..addBuilderFactory(
         const FullType(BuiltList, [FullType(CommandEventResponse)]),
         () => ListBuilder<CommandEventResponse>(),
       )
@@ -449,6 +453,38 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(ConversationSearchSummary)]),
         () => ListBuilder<ConversationSearchSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(MemberEntry)]),
+        () => ListBuilder<MemberEntry>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(ToolPermissionRuleSummary)]),
+        () => ListBuilder<ToolPermissionRuleSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(TemplateResponse)]),
+        () => ListBuilder<TemplateResponse>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(WorkflowRunSummary)]),
+        () => ListBuilder<WorkflowRunSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(AgentSummary)]),
+        () => ListBuilder<AgentSummary>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(WebhookResponse)]),
+        () => ListBuilder<WebhookResponse>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(SkillEntryResponse)]),
+        () => ListBuilder<SkillEntryResponse>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(ConversationSummary)]),
+        () => ListBuilder<ConversationSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(OrgSummary)]),
@@ -467,20 +503,8 @@ Serializers serializers = (_$serializers.toBuilder()
         () => ListBuilder<CatalogItemResponse>(),
       )
       ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(MemberEntry)]),
-        () => ListBuilder<MemberEntry>(),
-      )
-      ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(ToolPermissionRuleSummary)]),
-        () => ListBuilder<ToolPermissionRuleSummary>(),
-      )
-      ..addBuilderFactory(
         const FullType(BuiltList, [FullType(InterfaceInstanceResponse)]),
         () => ListBuilder<InterfaceInstanceResponse>(),
-      )
-      ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(TemplateResponse)]),
-        () => ListBuilder<TemplateResponse>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(SkillDetail)]),
@@ -489,6 +513,10 @@ Serializers serializers = (_$serializers.toBuilder()
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(BindingResponse)]),
         () => ListBuilder<BindingResponse>(),
+      )
+      ..addBuilderFactory(
+        const FullType(BuiltList, [FullType(ModelSummary)]),
+        () => ListBuilder<ModelSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(PersonaSummary)]),
@@ -507,28 +535,12 @@ Serializers serializers = (_$serializers.toBuilder()
         () => ListBuilder<CommandDefResponse>(),
       )
       ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(WorkflowRunSummary)]),
-        () => ListBuilder<WorkflowRunSummary>(),
-      )
-      ..addBuilderFactory(
         const FullType(BuiltList, [FullType(UserSummary)]),
         () => ListBuilder<UserSummary>(),
       )
       ..addBuilderFactory(
         const FullType(BuiltList, [FullType(SpaceSummary)]),
         () => ListBuilder<SpaceSummary>(),
-      )
-      ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(AgentSummary)]),
-        () => ListBuilder<AgentSummary>(),
-      )
-      ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(WebhookResponse)]),
-        () => ListBuilder<WebhookResponse>(),
-      )
-      ..addBuilderFactory(
-        const FullType(BuiltList, [FullType(SkillEntryResponse)]),
-        () => ListBuilder<SkillEntryResponse>(),
       )
       ..add(const OneOfSerializer())
       ..add(const AnyOfSerializer())

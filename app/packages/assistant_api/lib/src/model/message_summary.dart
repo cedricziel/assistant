@@ -24,6 +24,7 @@ part 'message_summary.g.dart';
 /// * [feedback] - The calling user's verdict on this message. Omitted when the caller has not rated it.
 /// * [finishReason] - Why the reply ended early; `\"cancelled\"` for a reply the user stopped. Omitted for every other message.
 /// * [id]
+/// * [model] - The model that produced this reply. Present on assistant messages saved with it recorded.
 /// * [parentId] - The message this one follows in the conversation tree. Omitted for a root.
 /// * [replyBranch] - On a user message whose reply has no visible assistant row: the versions of that reply.
 /// * [role]
@@ -59,6 +60,10 @@ abstract class MessageSummary
 
   @BuiltValueField(wireName: r'id')
   String get id;
+
+  /// The model that produced this reply. Present on assistant messages saved with it recorded.
+  @BuiltValueField(wireName: r'model')
+  String? get model;
 
   /// The message this one follows in the conversation tree. Omitted for a root.
   @BuiltValueField(wireName: r'parent_id')
@@ -160,6 +165,13 @@ class _$MessageSummarySerializer
       object.id,
       specifiedType: const FullType(String),
     );
+    if (object.model != null) {
+      yield r'model';
+      yield serializers.serialize(
+        object.model,
+        specifiedType: const FullType.nullable(String),
+      );
+    }
     if (object.parentId != null) {
       yield r'parent_id';
       yield serializers.serialize(
@@ -288,6 +300,14 @@ class _$MessageSummarySerializer
             specifiedType: const FullType(String),
           ) as String;
           result.id = valueDes;
+          break;
+        case r'model':
+          final valueDes = serializers.deserialize(
+            value,
+            specifiedType: const FullType.nullable(String),
+          ) as String?;
+          if (valueDes == null) continue;
+          result.model = valueDes;
           break;
         case r'parent_id':
           final valueDes = serializers.deserialize(

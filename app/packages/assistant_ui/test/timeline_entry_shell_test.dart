@@ -118,12 +118,14 @@ void main() {
         _shell(state: EntryState.active, disableAnimations: true),
       );
       expect(_expanded, findsOneWidget);
+      expect(find.byType(AnimatedSize), findsNothing);
 
       await tester.pumpWidget(_shell(disableAnimations: true));
       await tester.pump();
 
       // No time elapsed, and no pending timer fails the test on teardown.
       expect(_collapsed, findsOneWidget);
+      expect(find.byType(AnimatedSize), findsNothing);
     });
 
     testWidgets('stale renders at 0.6 opacity and collapses', (tester) async {

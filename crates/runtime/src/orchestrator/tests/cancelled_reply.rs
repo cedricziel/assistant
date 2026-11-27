@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use assistant_core::bus_messages::{self, topic};
+use assistant_core::bus_messages::{self, TurnAnchor, topic};
 use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{Interface, Message, MessageFinishReason, MessageRole};
 use assistant_core::{LlmProvider, LlmResponse, LlmResponseMeta};
@@ -13,13 +13,15 @@ use assistant_llm_provider::scripted::ScriptedLlmProvider;
 use assistant_storage::StorageLayer;
 use assistant_storage::conversations::ConversationStore;
 
-use super::super::{CANCELLED_REPLY_PLACEHOLDER, Orchestrator};
+use super::super::{CANCELLED_REPLY_PLACEHOLDER, CancelledTurn, Orchestrator};
 use super::{build, build_with_llm};
 
 struct Rig {
     orch: Arc<Orchestrator>,
     storage: Arc<StorageLayer>,
     conv: Uuid,
+    /// The run whose cancellation the tests persist.
+    run: Uuid,
 }
 
 impl Rig {
@@ -39,7 +41,14 @@ impl Rig {
             orch,
             storage,
             conv,
+            run: Uuid::new_v4(),
         }
+    }
+
+    /// `row` as written by the cancelled run.
+    fn mine(&self, mut row: Message) -> Message {
+        row.run_id = Some(self.run);
+        row
     }
 
     fn store(&self) -> impl ConversationStore + use<> {
@@ -56,8 +65,16 @@ impl Rig {
     }
 
     async fn persist(&self, text: &str) -> Uuid {
+        self.persist_anchored(text, TurnAnchor::Append).await
+    }
+
+    async fn persist_anchored(&self, text: &str, anchor: TurnAnchor) -> Uuid {
+        let turn = CancelledTurn {
+            run_id: self.run,
+            anchor,
+        };
         self.orch
-            .persist_cancelled_reply(self.conv, text, &Interface::Web)
+            .persist_cancelled_reply(self.conv, text, &Interface::Web, &turn)
             .await
             .unwrap()
     }
@@ -137,7 +154,7 @@ async fn whitespace_only_text_counts_as_no_text() {
 #[tokio::test]
 async fn a_final_answer_that_won_the_race_is_not_duplicated() {
     let rig = Rig::new().await;
-    let answer = Message::assistant(rig.conv, "Full");
+    let answer = rig.mine(Message::assistant(rig.conv, "Full"));
     let answer_id = answer.id;
     rig.seed(vec![user(rig.conv, "hi"), answer]).await;
 
@@ -294,12 +311,169 @@ async fn a_failed_save_is_an_error_and_announces_nothing() {
     .await
     .unwrap();
 
+    let turn = CancelledTurn {
+        run_id: rig.run,
+        anchor: TurnAnchor::Append,
+    };
     let result = rig
         .orch
-        .persist_cancelled_reply(rig.conv, "Partial", &Interface::Web)
+        .persist_cancelled_reply(rig.conv, "Partial", &Interface::Web, &turn)
         .await;
 
     assert!(result.is_err(), "the save failure reaches the caller");
     assert_eq!(rig.history().await.len(), 1);
     assert!(rig.announcements().await.is_empty());
+}
+
+// -- Anchor-aware replies (message-branching PR 7b) --
+
+fn regenerate(user: &Message) -> TurnAnchor {
+    TurnAnchor::Regenerate {
+        user_message_id: user.id,
+    }
+}
+
+/// `U` answered by an old reply, the state a regenerate starts from.
+async fn regenerate_rig() -> (Rig, Message, Message) {
+    let rig = Rig::new().await;
+    let u = user(rig.conv, "hi");
+    let old = Message::assistant(rig.conv, "Old reply");
+    rig.seed(vec![u.clone(), old.clone()]).await;
+    (rig, u, old)
+}
+
+#[tokio::test]
+async fn a_cancelled_regenerate_with_no_rows_saves_the_partial_under_the_user_row() {
+    let (rig, u, old) = regenerate_rig().await;
+
+    let id = rig.persist_anchored("Partial", regenerate(&u)).await;
+
+    let saved = rig.store().get_message(id).await.unwrap().unwrap();
+    assert_eq!(saved.parent_id, Some(u.id), "a sibling of the old reply");
+    assert_eq!(saved.content, "Partial");
+    assert_eq!(saved.finish_reason, Some(MessageFinishReason::Cancelled));
+    assert_eq!(saved.run_id, Some(rig.run), "the run owns the saved row");
+    let siblings = rig.store().children_of(rig.conv, Some(u.id)).await.unwrap();
+    assert_eq!(
+        siblings.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![old.id, id],
+        "the old reply is kept as the other version"
+    );
+    let history = rig.history().await;
+    assert_eq!(
+        history.last().map(|m| m.id),
+        Some(id),
+        "the new row is active"
+    );
+    assert_eq!(history.len(), 2, "U then the partial");
+}
+
+#[tokio::test]
+async fn a_cancelled_regenerate_with_no_text_saves_a_stopped_child_of_the_user_row() {
+    let (rig, u, _old) = regenerate_rig().await;
+
+    let id = rig.persist_anchored("", regenerate(&u)).await;
+
+    let saved = rig.store().get_message(id).await.unwrap().unwrap();
+    assert_eq!(saved.parent_id, Some(u.id));
+    assert_eq!(saved.content, CANCELLED_REPLY_PLACEHOLDER);
+    assert_eq!(saved.finish_reason, Some(MessageFinishReason::Cancelled));
+}
+
+#[tokio::test]
+async fn a_cancelled_regenerate_after_a_tool_call_row_appends_after_it() {
+    let (rig, u, old) = regenerate_rig().await;
+    // The runner's first row: a child of U, which made it the active leaf.
+    let call = rig.mine(tool_call_row(rig.conv, ""));
+    rig.store().branch_message(&call, Some(u.id)).await.unwrap();
+
+    let id = rig.persist_anchored("Partial", regenerate(&u)).await;
+
+    let saved = rig.store().get_message(id).await.unwrap().unwrap();
+    assert_eq!(saved.parent_id, Some(call.id), "after the run's own row");
+    let under_old = rig
+        .store()
+        .children_of(rig.conv, Some(old.id))
+        .await
+        .unwrap();
+    assert!(under_old.is_empty(), "nothing hangs under the old reply");
+    let ids: Vec<_> = rig.history().await.iter().map(|m| m.id).collect();
+    assert_eq!(ids, vec![u.id, call.id, id]);
+}
+
+#[tokio::test]
+async fn a_cancelled_edit_appends_under_the_edited_user_row() {
+    let rig = Rig::new().await;
+    let original = user(rig.conv, "first");
+    rig.seed(vec![original.clone(), Message::assistant(rig.conv, "Old")])
+        .await;
+    let edited = rig.mine(user(rig.conv, "second"));
+    rig.store().branch_message(&edited, None).await.unwrap();
+    let anchor = TurnAnchor::Edit {
+        parent_message_id: None,
+        edited_message_id: original.id,
+    };
+
+    let id = rig.persist_anchored("Partial", anchor).await;
+
+    let saved = rig.store().get_message(id).await.unwrap().unwrap();
+    assert_eq!(saved.parent_id, Some(edited.id));
+    assert_eq!(saved.finish_reason, Some(MessageFinishReason::Cancelled));
+}
+
+#[tokio::test]
+async fn the_race_guard_ignores_rows_of_other_runs() {
+    let (rig, u, old) = regenerate_rig().await;
+    assert!(old.run_id.is_none(), "the old reply belongs to no live run");
+
+    let id = rig.persist_anchored("Partial", regenerate(&u)).await;
+
+    assert_ne!(
+        id, old.id,
+        "the old reply is not reported as this run's answer"
+    );
+    let kept = rig.store().get_message(old.id).await.unwrap().unwrap();
+    assert_eq!(kept.finish_reason, None, "the old reply stays unmarked");
+}
+
+#[tokio::test]
+async fn the_race_guard_sees_the_final_answer_of_its_own_regenerate() {
+    let (rig, u, _old) = regenerate_rig().await;
+    let answer = rig.mine(Message::assistant(rig.conv, "Full"));
+    rig.store()
+        .branch_message(&answer, Some(u.id))
+        .await
+        .unwrap();
+
+    let id = rig.persist_anchored("Partial", regenerate(&u)).await;
+
+    assert_eq!(id, answer.id);
+    assert_eq!(rig.history().await.len(), 2, "nothing was saved");
+}
+
+#[tokio::test]
+async fn a_regenerate_of_an_earlier_user_row_branches_there() {
+    let rig = Rig::new().await;
+    let u1 = user(rig.conv, "one");
+    let a1 = Message::assistant(rig.conv, "Reply one");
+    let u2 = user(rig.conv, "two");
+    rig.seed(vec![
+        u1.clone(),
+        a1.clone(),
+        u2.clone(),
+        Message::assistant(rig.conv, "Reply two"),
+    ])
+    .await;
+
+    let id = rig.persist_anchored("Partial", regenerate(&u1)).await;
+
+    let saved = rig.store().get_message(id).await.unwrap().unwrap();
+    assert_eq!(saved.parent_id, Some(u1.id));
+    let ids: Vec<_> = rig.history().await.iter().map(|m| m.id).collect();
+    assert_eq!(
+        ids,
+        vec![u1.id, id],
+        "the later turns stay on the other branch"
+    );
+    assert_eq!(saved.turn, 1, "the turn follows its user row");
 }

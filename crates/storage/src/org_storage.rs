@@ -146,24 +146,10 @@ impl OrgStorageLayer {
 
 /// Run all org.db migrations in order.
 async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
-    sqlx::query("PRAGMA journal_mode=WAL;")
-        .execute(pool)
-        .await?;
+    crate::migrate::enable_wal(pool).await?;
     sqlx::query("PRAGMA foreign_keys=ON;").execute(pool).await?;
-    sqlx::query("PRAGMA busy_timeout = 5000;")
-        .execute(pool)
-        .await?;
 
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS _migrations (
-            name        TEXT PRIMARY KEY,
-            applied_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )",
-    )
-    .execute(pool)
-    .await?;
-
-    let migrations: &[(&str, &str)] = &[
+    let migrations: &[(&str, &'static str)] = &[
         (
             "001_org_tables",
             include_str!("../../../migrations/org/001_org_tables.sql"),
@@ -202,27 +188,7 @@ async fn run_org_migrations(pool: &SqlitePool) -> Result<()> {
         ),
     ];
 
-    for &(name, sql) in migrations {
-        let already_applied: bool =
-            sqlx::query_scalar("SELECT COUNT(*) > 0 FROM _migrations WHERE name = ?")
-                .bind(name)
-                .fetch_one(pool)
-                .await?;
-
-        if !already_applied {
-            debug!(migration = name, "applying org migration");
-            sqlx::raw_sql(sql)
-                .execute(pool)
-                .await
-                .with_context(|| format!("failed to apply org migration: {name}"))?;
-            sqlx::query("INSERT INTO _migrations (name) VALUES (?)")
-                .bind(name)
-                .execute(pool)
-                .await?;
-        }
-    }
-
-    Ok(())
+    crate::migrate::apply_migrations(pool, migrations).await
 }
 
 #[cfg(test)]
@@ -252,6 +218,26 @@ mod tests {
             .unwrap();
         assert_eq!(count.0, 0);
         assert!(db_path.exists());
+    }
+
+    /// The web and orchestrator containers open the same org.db at startup;
+    /// both must come up when a new migration is pending.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_opens_apply_each_migration_once() {
+        for _ in 0..10 {
+            let dir = tempfile::tempdir().unwrap();
+            let db_path = dir.path().join("org.db");
+
+            let opens: Vec<_> = (0..4)
+                .map(|_| {
+                    let path = db_path.clone();
+                    tokio::spawn(async move { OrgStorageLayer::new(&path).await })
+                })
+                .collect();
+            for open in opens {
+                open.await.unwrap().unwrap();
+            }
+        }
     }
 
     #[tokio::test]

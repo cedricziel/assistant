@@ -19,6 +19,9 @@ provider = "ollama"
 #
 # Use Q4_K_M quantization for 14 B+ models.
 model = "qwen2.5:7b"
+# Other models a member may pick when regenerating a reply, besides `model`.
+# They run on this provider and endpoint. Empty: only `model` is offered.
+# available_models = ["qwen2.5:14b"]
 # Ollama API base URL
 base_url = "http://localhost:11434"
 # Maximum tool-calling iterations per turn

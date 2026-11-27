@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_smooth_markdown: ^0.8.1
+  flutter_smooth_markdown: ^0.11.0
   highlight: 0.7.0
   material_ui: ^1.11.1
 dev_dependencies:

@@ -18,7 +18,10 @@ use assistant_a2ui::{
     CATALOG_ID, Component, SurfaceDraft, SurfaceMessages, SurfacePatch, UrlPolicy, validate,
 };
 use assistant_core::ToolOutput;
-use assistant_storage::{NewSurface, Surface, SurfaceChanges, SurfaceStatus};
+use assistant_core::identity::UserId;
+use assistant_storage::{NewSurface, Surface, SurfaceChanges, SurfaceStatus, Transition};
+
+use crate::interaction::{InteractionOutcome, InteractionRequest};
 
 use super::{Orchestrator, OrchestratorEvent};
 
@@ -27,6 +30,9 @@ pub(crate) const RENDER_SURFACE_TOOL: &str = "render-surface";
 
 /// Successful `render-surface` calls (creates and updates) allowed per turn.
 const MAX_SURFACE_CALLS_PER_TURN: u32 = 5;
+
+/// The interaction kind an in-turn wait registers (see `InteractionKinds`).
+const SURFACE_ACTION_KIND: &str = "surface_action";
 
 const PROTOCOL_VERSION: &str = "1.0";
 
@@ -53,6 +59,9 @@ pub(crate) struct SurfaceCall<'a> {
     pub(crate) turn: &'a mut SurfaceTurn,
     pub(crate) anchor_message_id: Uuid,
     pub(crate) call_index: usize,
+    /// The run and its owner, who an in-turn wait is addressed to.
+    pub(crate) run_id: Option<Uuid>,
+    pub(crate) user_id: Option<UserId>,
 }
 
 /// A surface change that was persisted.
@@ -60,6 +69,8 @@ struct Applied {
     surface: Surface,
     messages: Vec<Value>,
     observation: String,
+    /// The Button action names, when the model asked the turn to wait.
+    wait_for: Option<Vec<String>>,
 }
 
 impl Orchestrator {
@@ -118,7 +129,126 @@ impl Orchestrator {
                 })
                 .await;
         }
-        ToolOutput::success(applied.observation)
+        match applied.wait_for {
+            Some(actions) => {
+                let observation = self
+                    .wait_for_action(&applied.surface, actions, &call, event_sink, tool_call_id)
+                    .await;
+                ToolOutput::success(observation)
+            }
+            None => ToolOutput::success(applied.observation),
+        }
+    }
+
+    /// Hold the turn on a `surface_action` interaction for `surface` and say
+    /// what happened. The surface was announced first, so the interaction
+    /// always follows its `surface_update`. Only a resolved action closes the
+    /// surface; every other ending leaves it `active`.
+    async fn wait_for_action(
+        &self,
+        surface: &Surface,
+        actions: Vec<String>,
+        call: &SurfaceCall<'_>,
+        event_sink: Option<&tokio::sync::mpsc::Sender<OrchestratorEvent>>,
+        tool_call_id: Option<&str>,
+    ) -> String {
+        let (Some(broker), Some(run_id), Some(user)) =
+            (&self.interaction_broker, call.run_id, call.user_id.as_ref())
+        else {
+            return format!(
+                "Surface shown to the user (surface_id: {}). This turn cannot wait for an \
+                 answer, so continue without it.",
+                surface.id
+            );
+        };
+        let request = json!({
+            "surface_id": surface.id,
+            "tool_call_id": tool_call_id,
+            "title": surface.title,
+            "actions": actions,
+            "send_data_model": surface.send_data_model,
+        });
+        let asked = broker
+            .request(
+                InteractionRequest {
+                    conversation_id: surface.conversation_id.to_string(),
+                    run_id: run_id.to_string(),
+                    user_id: user.0.clone(),
+                    kind: SURFACE_ACTION_KIND.to_string(),
+                    tool_call_id: tool_call_id.map(str::to_string),
+                    request: request.clone(),
+                    turn_deadline: None,
+                },
+                event_sink,
+            )
+            .await;
+        let outcome = match asked {
+            Ok((_, outcome)) => outcome,
+            Err(e) => {
+                warn!(error = %e, "Failed to wait for a surface action");
+                return "The surface is shown, but waiting for the user's answer failed. \
+                        Continue without it."
+                    .into();
+            }
+        };
+        let observation = broker
+            .kinds()
+            .get(SURFACE_ACTION_KIND)
+            .map(|kind| kind.observation(&request, &outcome))
+            .unwrap_or_default();
+        let InteractionOutcome::Resolved { response, .. } = &outcome else {
+            return observation;
+        };
+        if response["declined"] == true {
+            return observation;
+        }
+        self.submit_surface(surface, response, event_sink, observation)
+            .await
+    }
+
+    /// Mark `surface` submitted with the answer's action and announce it.
+    /// Returns `observation`, or says the surface was submitted another way
+    /// when this answer lost the race.
+    async fn submit_surface(
+        &self,
+        surface: &Surface,
+        response: &Value,
+        event_sink: Option<&tokio::sync::mpsc::Sender<OrchestratorEvent>>,
+        observation: String,
+    ) -> String {
+        // An in-turn answer is carried by no user message; the id only has to
+        // be unique so `action_message_map` never confuses two surfaces.
+        let marked = self
+            .surface_store
+            .mark_submitted(surface.id, &response["action"], Uuid::new_v4())
+            .await;
+        match marked {
+            Ok(Transition::Applied) => {}
+            Ok(Transition::Conflict) => {
+                return "This surface was already submitted in a new message, so this answer \
+                        was not used."
+                    .into();
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to mark a surface submitted");
+                return observation;
+            }
+        }
+        if let Some(sink) = event_sink {
+            let _ = sink
+                .send(OrchestratorEvent::SurfaceUpdate {
+                    surface_id: surface.id.to_string(),
+                    tool_call_id: surface.tool_call_id.clone(),
+                    anchor_message_id: surface.anchor_message_id.to_string(),
+                    anchor_call_index: u32::try_from(surface.anchor_call_index).unwrap_or_default(),
+                    title: surface.title.clone(),
+                    fallback_text: surface.fallback_text.clone(),
+                    status: "submitted".to_string(),
+                    messages: Vec::new(),
+                })
+                .await;
+        }
+        observation
     }
 
     async fn create_surface(
@@ -154,6 +284,8 @@ impl Orchestrator {
             serde_json::to_value(SurfaceMessages::create(&draft, &id.to_string()))
                 .map_err(encode_error)?,
         ];
+        let wait_for = (data.get("wait_for_action") == Some(&Value::Bool(true)))
+            .then(|| draft.declared_action_names().into_iter().collect());
         Ok(Applied {
             observation: format!(
                 "Surface shown to the user (surface_id: {id}). To change it later in this turn, \
@@ -161,6 +293,7 @@ impl Orchestrator {
             ),
             surface,
             messages,
+            wait_for,
         })
     }
 
@@ -235,6 +368,7 @@ impl Orchestrator {
             observation: format!("Surface {id} updated."),
             surface,
             messages,
+            wait_for: None,
         })
     }
 }

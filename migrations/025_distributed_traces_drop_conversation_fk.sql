@@ -1,7 +1,5 @@
 -- Migration 025: make distributed_traces standalone (no conversation FK)
 
-BEGIN TRANSACTION;
-
 CREATE TABLE distributed_traces_new (
     span_id          TEXT PRIMARY KEY,
     trace_id         TEXT NOT NULL,
@@ -71,4 +69,3 @@ CREATE INDEX idx_distributed_traces_trace
 CREATE INDEX idx_distributed_traces_service
     ON distributed_traces(service_name, start_time DESC);
 
-COMMIT;

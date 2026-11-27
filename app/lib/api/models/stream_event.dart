@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:assistant_ui/models.dart' show McpApp;
+import 'package:assistant_ui/models.dart' show McpApp, MessageTiming;
 
 /// Sealed class hierarchy representing a single SSE event from the chat API.
 ///
@@ -214,6 +214,7 @@ class DoneEvent extends StreamEvent {
     required this.role,
     required this.content,
     this.messageId,
+    this.timing,
     super.sequenceId,
   });
 
@@ -226,12 +227,27 @@ class DoneEvent extends StreamEvent {
   /// Null when the server did not include a `message_id` field (old server).
   final String? messageId;
 
+  /// How long the turn took, when the server measured it.
+  final MessageTiming? timing;
+
   factory DoneEvent.fromJson(Map<String, dynamic> json) {
     return DoneEvent(
       role: json['role'] as String? ?? 'assistant',
       content: json['content'] as String? ?? '',
       messageId: json['message_id'] as String?,
+      timing: messageTimingFromJson(json['timing']),
     );
+  }
+}
+
+/// Reads the `timing` object of a `done` frame, ignoring a malformed one so a
+/// bad timing never drops the event it travelled on.
+MessageTiming? messageTimingFromJson(Object? value) {
+  if (value is! Map) return null;
+  try {
+    return MessageTiming.fromJson(value.cast<String, Object?>());
+  } on FormatException {
+    return null;
   }
 }
 

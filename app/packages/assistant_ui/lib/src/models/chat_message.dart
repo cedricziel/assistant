@@ -264,6 +264,7 @@ class ChatMessage {
   bool get isAssistant => role == 'assistant';
 
   ChatMessage copyWith({
+    String? id,
     String? content,
     bool? isStreaming,
     MessageStatus? status,
@@ -285,7 +286,7 @@ class ChatMessage {
     bool clearFeedback = false,
   }) {
     return ChatMessage(
-        id: id,
+        id: id ?? this.id,
         role: role,
         content: content ?? this.content,
         isStreaming: isStreaming ?? this.isStreaming,

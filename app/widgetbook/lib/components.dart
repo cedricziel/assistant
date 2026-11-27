@@ -32,26 +32,25 @@ import 'components/question_card.dart';
 import 'components/queued_message_bubble.dart';
 import 'components/regenerate_menu_button.dart';
 import 'components/slash_command_menu.dart';
+import 'components/sources_result_view.dart';
 import 'components/starter_prompts.dart';
 import 'components/suggestion_chips.dart';
 import 'components/surface_frame.dart';
 import 'components/subagent_body.dart';
+import 'components/terminal_result_view.dart';
 import 'components/thinking_body.dart';
 import 'components/thread_density_scope.dart';
 import 'components/thread_empty_state.dart';
 import 'components/thread_error_banner.dart';
 import 'components/thread_viewport.dart';
 import 'components/timeline_entry_shell.dart';
+import 'components/timeline_entry_view.dart';
 import 'components/tool_call_body.dart';
 import 'components/tool_result_renderer_scope.dart';
 import 'components/tool_status_icon.dart';
 import 'components/turn_progress_card.dart';
 import 'components/typing_indicator.dart';
 import 'components/unknown_interaction_card.dart';
-
-// import 'components/timeline_entry_shell.dart'; // slot: chat-element-library 5b
-
-// import 'components/timeline_entry_view.dart'; // slot: chat-element-library 7c
 
 // import 'components/unknown_interaction_card.dart'; // slot: tool-approval-prompts 13b
 
@@ -68,10 +67,7 @@ final List<WidgetbookComponent> kComponents = [
   // messageEditorComponent, // slot: message-branching 9
   // permissionRuleTileComponent, // slot: tool-approval-prompts 14b
   // planResultViewComponent, // slot: tool-result-renderers C5
-  // sourcesResultViewComponent, // slot: tool-result-renderers C4
-  // terminalResultViewComponent, // slot: tool-result-renderers C4
   // timelineEntryShellComponent, // slot: chat-element-library 5b
-  // timelineEntryViewComponent, // slot: chat-element-library 7c
   // unknownInteractionCardComponent, // slot: tool-approval-prompts 13b
   approvalCardComponent,
   attachmentTrayComponent,
@@ -105,16 +101,19 @@ final List<WidgetbookComponent> kComponents = [
   queuedMessageBubbleComponent,
   regenerateMenuButtonComponent,
   slashCommandMenuComponent,
+  sourcesResultViewComponent,
   starterPromptsComponent,
   subagentBodyComponent,
   suggestionChipsComponent,
   surfaceFrameComponent,
+  terminalResultViewComponent,
   thinkingBodyComponent,
   threadDensityScopeComponent,
   threadEmptyStateComponent,
   threadErrorBannerComponent,
   threadViewportComponent,
   timelineEntryShellComponent,
+  timelineEntryViewComponent,
   toolCallBodyComponent,
   toolResultRendererScopeComponent,
   toolStatusIconComponent,

@@ -296,14 +296,13 @@ pub(crate) async fn split_process_state(llm_url: &str) -> (ApiState, Arc<Storage
 pub(crate) async fn split_process_state_with_approvals(
     llm_url: &str,
     config: OrgConfig,
-) -> (ApiState, Arc<StorageLayer>) {
+) -> (ApiState, ApiState, Arc<StorageLayer>) {
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let spaces = [default_space(&storage)];
     let root = Path::new("/nonexistent/assistant-test-root");
     let (state, _) = state_over_runtimes(root, llm_url, &spaces, false, config.clone(), true).await;
-    let _orchestrator_process =
-        state_over_runtimes(root, llm_url, &spaces, true, config, true).await;
-    (state, storage)
+    let (worker, _) = state_over_runtimes(root, llm_url, &spaces, true, config, true).await;
+    (state, worker, storage)
 }
 
 pub(crate) fn default_space(storage: &Arc<StorageLayer>) -> TestSpace {
@@ -320,6 +319,25 @@ pub(crate) fn default_space(storage: &Arc<StorageLayer>) -> TestSpace {
 pub(crate) async fn test_state(llm_url: &str) -> (ApiState, Arc<StorageLayer>) {
     let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
     let (state, _) = state_over(llm_url, &[default_space(&storage)], true).await;
+    (state, storage)
+}
+
+/// [`test_state`] over an org whose LLM is the mock at `llm_url`, named
+/// `test`, and which lists `available` for regenerate.
+pub(crate) async fn models_state(
+    llm_url: &str,
+    available: &[&str],
+) -> (ApiState, Arc<StorageLayer>) {
+    let storage = Arc::new(StorageLayer::new_in_memory().await.unwrap());
+    let mut config = OrgConfig::default();
+    config.memory.enabled = false;
+    config.suggestions.enabled = false;
+    config.llm.model = "test".to_string();
+    config.llm.base_url = llm_url.to_string();
+    config.llm.available_models = available.iter().map(|m| (*m).to_string()).collect();
+    let root = Path::new("/nonexistent/assistant-test-root");
+    let (state, _) =
+        state_over_config(root, llm_url, &[default_space(&storage)], true, config).await;
     (state, storage)
 }
 

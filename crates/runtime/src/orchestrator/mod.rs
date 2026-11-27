@@ -63,7 +63,7 @@ mod worker;
 mod tests;
 
 pub use branch::{BRANCH_CANCEL_WAIT, BranchConflict};
-pub use cancelled_reply::CANCELLED_REPLY_PLACEHOLDER;
+pub use cancelled_reply::{CANCELLED_REPLY_PLACEHOLDER, CancelledTurn};
 pub use relay::RunEventRelay;
 pub use stream_event::OrchestratorEvent;
 pub use submit::SubmitTurn;
@@ -399,6 +399,10 @@ pub struct Orchestrator {
     /// Where each turn gets the tools only it may see, with the space it is
     /// asked for.
     pub(crate) turn_tool_source: Option<TurnToolBinding>,
+    /// Where interactive turns put questions to their owner and wait on a
+    /// `surface_action`. `None` leaves the `ask-user` tool out of every turn
+    /// and shows a surface that asks to be waited on without waiting.
+    pub(crate) interaction_broker: Option<Arc<crate::interaction::InteractionBroker>>,
     /// Where `render-surface` results are persisted (see `surface_hook`).
     pub(crate) surface_store: Arc<dyn assistant_storage::SurfaceStore>,
 }
@@ -467,6 +471,7 @@ impl Orchestrator {
             learning_config: config.learning.clone(),
             clock: Arc::new(assistant_core::clock::SystemClock),
             turn_tool_source: None,
+            interaction_broker: None,
             surface_store,
         }
     }
@@ -495,17 +500,38 @@ impl Orchestrator {
         self
     }
 
-    /// The tools this turn alone may use.
-    async fn turn_overlay(&self, identity: &TurnIdentity) -> ToolOverlay {
-        let Some(binding) = &self.turn_tool_source else {
-            return ToolOverlay::default();
+    /// Let turns ask their owner (`ask-user`) and wait on `surface_action`
+    /// interactions through `broker`.
+    pub fn with_interaction_broker(
+        mut self,
+        broker: Arc<crate::interaction::InteractionBroker>,
+    ) -> Self {
+        self.interaction_broker = Some(broker);
+        self
+    }
+
+    /// The tools this turn alone may use: its user's integrations, and
+    /// `ask-user` when someone is watching a rich client.
+    async fn turn_overlay(&self, identity: &TurnIdentity, interface: &Interface) -> ToolOverlay {
+        let mut tools = match &self.turn_tool_source {
+            Some(binding) => {
+                let scope = TurnScope {
+                    org_slug: &binding.org_slug,
+                    space_slug: &binding.space_slug,
+                    user_id: identity.user_id.as_ref(),
+                };
+                binding.source.tools_for_turn(&scope).await
+            }
+            None => Vec::new(),
         };
-        let scope = TurnScope {
-            org_slug: &binding.org_slug,
-            space_slug: &binding.space_slug,
-            user_id: identity.user_id.as_ref(),
-        };
-        ToolOverlay::new(binding.source.tools_for_turn(&scope).await)
+        if let Some(broker) = &self.interaction_broker
+            && Self::rich_client_turn(interface, identity.interactive, 0)
+        {
+            tools.push(Arc::new(crate::interaction::AskUserTool::new(
+                broker.clone(),
+            )));
+        }
+        ToolOverlay::new(tools)
     }
 
     /// Override the `submit` timeout for this orchestrator instance.
@@ -1032,7 +1058,7 @@ impl Orchestrator {
         let chat_options = self.turn_chat_options(voice_turn, llm.as_ref());
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
-        let overlay = self.turn_overlay(&identity).await;
+        let overlay = self.turn_overlay(&identity, &interface).await;
         let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
         let global_specs = Self::filter_tool_specs(
             self.executor.to_specs_with(&overlay),
@@ -1362,6 +1388,8 @@ impl Orchestrator {
                                         turn: &mut surface_turn,
                                         anchor_message_id,
                                         call_index,
+                                        run_id: ctx.run_id,
+                                        user_id: ctx.user_id.clone(),
                                     }),
                                 )
                                 .await;
@@ -1488,7 +1516,7 @@ impl Orchestrator {
         let chat_options = self.turn_chat_options(voice_turn, llm.as_ref());
         let compaction_config = Self::compaction_for(&self.compaction_config, llm.as_ref());
         let provider_caps = llm.capabilities();
-        let overlay = self.turn_overlay(&identity).await;
+        let overlay = self.turn_overlay(&identity, &interface).await;
         let rich_client = Self::rich_client_turn(&interface, identity.interactive, 0);
         let tool_specs = Self::filter_tool_specs(
             self.executor.to_specs_with(&overlay),
@@ -1798,6 +1826,8 @@ impl Orchestrator {
                                     turn: &mut surface_turn,
                                     anchor_message_id,
                                     call_index,
+                                    run_id: ctx.run_id,
+                                    user_id: ctx.user_id.clone(),
                                 }),
                             )
                             .await;
@@ -2065,9 +2095,19 @@ impl Orchestrator {
             .unwrap_or_default();
 
         let summaries = self.storage.conversation_summary_store();
-        let mut history =
-            crate::history::build_turn_history(prior, conversation_id, &summaries, &att_map)
-                .await?;
+        let surface_actions = crate::history::build_surface_action_map(
+            &self.storage.surface_store(),
+            conversation_id,
+        )
+        .await;
+        let mut history = crate::history::build_turn_history(
+            prior,
+            conversation_id,
+            &summaries,
+            &att_map,
+            &surface_actions,
+        )
+        .await?;
         crate::history::sanitize_history(&mut history);
 
         // The turn's user message: the prompt, or for a regenerate the stored
@@ -2122,16 +2162,22 @@ impl Orchestrator {
         }
 
         let user_row_id = user.as_ref().or(regenerated.as_ref()).map(|m| m.id);
+        // The current message gets the same synthesized block a later rebuild
+        // will add; the stored content is the visible text only.
+        let history_text = match user_row_id.and_then(|id| surface_actions.get(&id)) {
+            Some(block) => format!("{block}\n{user_message}"),
+            None => user_message.to_string(),
+        };
         if all_attachments.is_empty() {
             history.push(
                 ChatHistoryMessage::Text {
                     role: ChatRole::User,
-                    content: user_message.to_string(),
+                    content: history_text,
                 },
                 user_row_id,
             );
         } else {
-            let mut blocks = vec![ContentBlock::Text(user_message.to_string())];
+            let mut blocks = vec![ContentBlock::Text(history_text)];
             blocks.extend(all_attachments);
             history.push(
                 ChatHistoryMessage::MultimodalUser { content: blocks },

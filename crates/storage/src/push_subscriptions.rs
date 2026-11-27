@@ -16,20 +16,41 @@ pub struct PushSubscription {
     pub endpoint: String,
     pub p256dh: String,
     pub auth: String,
+    /// The user the browser subscribed as. `None` for subscriptions stored
+    /// before the column existed; they only receive broadcast pushes.
+    pub user_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
 /// Trait-based interface for PWA push subscription persistence.
 #[async_trait]
 pub trait PushSubscriptionStore: Send + Sync {
-    /// Insert or update a subscription by `endpoint` (unique key).
-    async fn upsert(&self, endpoint: &str, p256dh: &str, auth: &str) -> Result<()>;
+    /// Insert or update a subscription by `endpoint` (unique key). The
+    /// subscription belongs to `user_id` afterwards, even when another user
+    /// held the endpoint before (a shared browser).
+    async fn upsert(
+        &self,
+        endpoint: &str,
+        p256dh: &str,
+        auth: &str,
+        user_id: Option<&str>,
+    ) -> Result<()>;
 
     /// Delete a subscription by its push endpoint URL.
     async fn delete(&self, endpoint: &str) -> Result<()>;
 
     /// Return every stored subscription (used by the push dispatcher).
     async fn list_all(&self) -> Result<Vec<PushSubscription>>;
+
+    /// Return the subscriptions that belong to `user_id`, oldest first.
+    async fn list_for_user(&self, user_id: &str) -> Result<Vec<PushSubscription>>;
+
+    /// Return the subscription currently stored at `endpoint`, if any.
+    ///
+    /// Senders recheck this immediately before delivering a user-scoped push:
+    /// `upsert` can rebind an endpoint to another user after the send took its
+    /// snapshot.
+    async fn get_by_endpoint(&self, endpoint: &str) -> Result<Option<PushSubscription>>;
 }
 
 /// SQLite-backed store for PWA push subscriptions.
@@ -55,16 +76,24 @@ impl SqlitePushSubscriptionStore {
 
 #[async_trait]
 impl PushSubscriptionStore for SqlitePushSubscriptionStore {
-    async fn upsert(&self, endpoint: &str, p256dh: &str, auth: &str) -> Result<()> {
+    async fn upsert(
+        &self,
+        endpoint: &str,
+        p256dh: &str,
+        auth: &str,
+        user_id: Option<&str>,
+    ) -> Result<()> {
         let now = self.clock.now();
         sqlx::query(
-            "INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at) \
-             VALUES (?1, ?2, ?3, ?4) \
-             ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth",
+            "INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_id, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT(endpoint) DO UPDATE SET \
+             p256dh = excluded.p256dh, auth = excluded.auth, user_id = excluded.user_id",
         )
         .bind(endpoint)
         .bind(p256dh)
         .bind(auth)
+        .bind(user_id)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -83,23 +112,44 @@ impl PushSubscriptionStore for SqlitePushSubscriptionStore {
     /// Return every stored subscription (used by the push dispatcher).
     async fn list_all(&self) -> Result<Vec<PushSubscription>> {
         let rows = sqlx::query(
-            "SELECT id, endpoint, p256dh, auth, created_at FROM push_subscriptions ORDER BY id",
+            "SELECT id, endpoint, p256dh, auth, user_id, created_at FROM push_subscriptions ORDER BY id",
         )
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.iter().map(subscription_from_row).collect())
+    }
+
+    async fn list_for_user(&self, user_id: &str) -> Result<Vec<PushSubscription>> {
+        let rows = sqlx::query(
+            "SELECT id, endpoint, p256dh, auth, user_id, created_at FROM push_subscriptions \
+             WHERE user_id = ?1 ORDER BY id",
+        )
+        .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
+        Ok(rows.iter().map(subscription_from_row).collect())
+    }
 
-        let subs = rows
-            .into_iter()
-            .map(|r| PushSubscription {
-                id: r.get("id"),
-                endpoint: r.get("endpoint"),
-                p256dh: r.get("p256dh"),
-                auth: r.get("auth"),
-                created_at: r.get("created_at"),
-            })
-            .collect();
+    async fn get_by_endpoint(&self, endpoint: &str) -> Result<Option<PushSubscription>> {
+        let row = sqlx::query(
+            "SELECT id, endpoint, p256dh, auth, user_id, created_at FROM push_subscriptions \
+             WHERE endpoint = ?1",
+        )
+        .bind(endpoint)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(subscription_from_row))
+    }
+}
 
-        Ok(subs)
+fn subscription_from_row(r: &sqlx::sqlite::SqliteRow) -> PushSubscription {
+    PushSubscription {
+        id: r.get("id"),
+        endpoint: r.get("endpoint"),
+        p256dh: r.get("p256dh"),
+        auth: r.get("auth"),
+        user_id: r.get("user_id"),
+        created_at: r.get("created_at"),
     }
 }
 
@@ -141,7 +191,13 @@ impl Default for InMemoryPushSubscriptionStore {
 
 #[async_trait]
 impl PushSubscriptionStore for InMemoryPushSubscriptionStore {
-    async fn upsert(&self, endpoint: &str, p256dh: &str, auth: &str) -> Result<()> {
+    async fn upsert(
+        &self,
+        endpoint: &str,
+        p256dh: &str,
+        auth: &str,
+        user_id: Option<&str>,
+    ) -> Result<()> {
         let now = self.clock.now();
         let mut state = match self.state.lock() {
             Ok(g) => g,
@@ -150,6 +206,7 @@ impl PushSubscriptionStore for InMemoryPushSubscriptionStore {
         if let Some(sub) = state.by_endpoint.get_mut(endpoint) {
             sub.p256dh = p256dh.to_string();
             sub.auth = auth.to_string();
+            sub.user_id = user_id.map(str::to_string);
         } else {
             state.next_id += 1;
             let id = state.next_id;
@@ -160,6 +217,7 @@ impl PushSubscriptionStore for InMemoryPushSubscriptionStore {
                     endpoint: endpoint.to_string(),
                     p256dh: p256dh.to_string(),
                     auth: auth.to_string(),
+                    user_id: user_id.map(str::to_string),
                     created_at: now,
                 },
             );
@@ -185,6 +243,20 @@ impl PushSubscriptionStore for InMemoryPushSubscriptionStore {
         subs.sort_by_key(|s| s.id);
         Ok(subs)
     }
+
+    async fn list_for_user(&self, user_id: &str) -> Result<Vec<PushSubscription>> {
+        let mut subs = self.list_all().await?;
+        subs.retain(|s| s.user_id.as_deref() == Some(user_id));
+        Ok(subs)
+    }
+
+    async fn get_by_endpoint(&self, endpoint: &str) -> Result<Option<PushSubscription>> {
+        let state = match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        Ok(state.by_endpoint.get(endpoint).cloned())
+    }
 }
 
 // -- Tests -------------------------------------------------------------------
@@ -204,7 +276,12 @@ mod tests {
         let store = store().await;
 
         store
-            .upsert("https://push.example.com/123", "p256key", "authsecret")
+            .upsert(
+                "https://push.example.com/123",
+                "p256key",
+                "authsecret",
+                None,
+            )
             .await
             .unwrap();
 
@@ -220,11 +297,11 @@ mod tests {
         let store = store().await;
 
         store
-            .upsert("https://push.example.com/abc", "key1", "auth1")
+            .upsert("https://push.example.com/abc", "key1", "auth1", None)
             .await
             .unwrap();
         store
-            .upsert("https://push.example.com/abc", "key2", "auth2")
+            .upsert("https://push.example.com/abc", "key2", "auth2", None)
             .await
             .unwrap();
 
@@ -239,7 +316,7 @@ mod tests {
         let store = store().await;
 
         store
-            .upsert("https://push.example.com/del", "key", "auth")
+            .upsert("https://push.example.com/del", "key", "auth", None)
             .await
             .unwrap();
         store.delete("https://push.example.com/del").await.unwrap();

@@ -308,6 +308,7 @@ class MessageAttachments extends StatelessWidget {
               ),
             ),
             IconButton(
+              tooltip: 'Close image',
               icon: Icon(
                 Icons.close,
                 color: Theme.of(context).colorScheme.onPrimary,

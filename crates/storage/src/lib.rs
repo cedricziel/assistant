@@ -34,6 +34,7 @@ pub mod memory_chunks;
 pub mod message_bus;
 pub mod message_feedback;
 pub mod message_timings;
+mod migrate;
 pub mod org_oidc_config_store;
 pub mod org_storage;
 pub mod org_store;
@@ -353,45 +354,10 @@ const SPACE_MIGRATIONS: &[(&str, &str)] =
 /// non-idempotent statements (e.g. `ALTER TABLE ADD COLUMN`) from failing on
 /// subsequent launches.
 async fn run_migrations(pool: &SqlitePool) -> Result<()> {
-    sqlx::query("PRAGMA journal_mode=WAL;")
-        .execute(pool)
-        .await?;
+    migrate::enable_wal(pool).await?;
     sqlx::query("PRAGMA foreign_keys=ON;").execute(pool).await?;
 
-    // Wait up to 5 s when the database is locked by another connection instead
-    // of returning SQLITE_BUSY immediately.  This is critical because the OTel
-    // exporters, the orchestrator, and the message bus all share the same pool
-    // and contend for the single SQLite write lock.
-    sqlx::query("PRAGMA busy_timeout = 5000;")
-        .execute(pool)
-        .await?;
-
-    // Migration tracking table — created once, never dropped.
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS _migrations (
-            name        TEXT PRIMARY KEY,
-            applied_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )",
-    )
-    .execute(pool)
-    .await?;
-
-    for &(name, sql) in SPACE_MIGRATIONS {
-        let already_applied: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM _migrations WHERE name = ?")
-                .bind(name)
-                .fetch_one(pool)
-                .await?;
-
-        if already_applied == 0 {
-            sqlx::raw_sql(sql).execute(pool).await?;
-            sqlx::query("INSERT INTO _migrations (name) VALUES (?)")
-                .bind(name)
-                .execute(pool)
-                .await?;
-            info!(migration = %name, "Applied migration");
-        }
-    }
+    migrate::apply_migrations(pool, SPACE_MIGRATIONS).await?;
 
     info!("Database migrations applied successfully");
     Ok(())
@@ -406,6 +372,27 @@ mod tests {
     use uuid::Uuid;
 
     use super::{SPACE_MIGRATIONS, StorageLayer};
+
+    /// The web and orchestrator containers open the same space.db at
+    /// startup; both must come up when a new migration is pending.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_opens_apply_each_migration_once() -> Result<()> {
+        for _ in 0..5 {
+            let dir = tempfile::tempdir()?;
+            let db_path = dir.path().join("space.db");
+
+            let opens: Vec<_> = (0..4)
+                .map(|_| {
+                    let path = db_path.clone();
+                    tokio::spawn(async move { StorageLayer::new(&path).await })
+                })
+                .collect();
+            for open in opens {
+                open.await??;
+            }
+        }
+        Ok(())
+    }
 
     /// Every `migrations/*.sql` file (top level only) is registered, in file
     /// name order, under its file stem. Adding a migration is adding a file.

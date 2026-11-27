@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../models/timeline_state.dart';
@@ -25,6 +26,7 @@ class TimelineEntryShell extends StatefulWidget {
     required this.label,
     this.status,
     this.entryState = EntryState.complete,
+    this.failed = false,
     this.expandable = false,
     this.forceExpand = false,
     this.body,
@@ -45,6 +47,10 @@ class TimelineEntryShell extends StatefulWidget {
   final Widget? status;
 
   final EntryState entryState;
+
+  /// Whether the entry's work ended in an error. The header's semantics label
+  /// appends ", failed" then, since [EntryState] has no error value.
+  final bool failed;
 
   /// Whether tapping the header toggles the [body].
   final bool expandable;
@@ -91,6 +97,8 @@ class TimelineEntryShell extends StatefulWidget {
 class _TimelineEntryShellState extends State<TimelineEntryShell> {
   bool _expanded = false;
   bool _userPinned = false;
+  bool _hasFocus = false;
+  bool _showFocusHighlight = false;
   Timer? _collapseTimer;
 
   @override
@@ -199,6 +207,132 @@ class _TimelineEntryShellState extends State<TimelineEntryShell> {
     );
   }
 
+  /// The header's spoken status: pending input first, then an error, then the
+  /// entry state.
+  String get _statusLabel {
+    if (widget.entryState == EntryState.awaitingInput) return 'awaiting input';
+    if (widget.failed) return 'failed';
+    return switch (widget.entryState) {
+      EntryState.active => 'running',
+      EntryState.complete => 'done',
+      EntryState.stale => 'stale',
+      EntryState.awaitingInput => 'awaiting input',
+    };
+  }
+
+  Widget _header(
+    ColorScheme colorScheme, {
+    required bool isExpanded,
+    required bool showStatus,
+    required Widget? status,
+    required bool awaitingInput,
+  }) {
+    final borderRadius = BorderRadius.circular(12);
+    final pill = Container(
+      key: TimelineEntryShell.headerKey,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withAlpha(120),
+        borderRadius: borderRadius,
+      ),
+      // Painted over the pill so the accent and the focus ring move no layout.
+      foregroundDecoration: awaitingInput
+          ? BoxDecoration(
+              borderRadius: borderRadius,
+              border: Border.all(color: colorScheme.primary, width: 1.5),
+            )
+          : _showFocusHighlight
+          ? BoxDecoration(
+              borderRadius: borderRadius,
+              border: Border.all(color: colorScheme.primary, width: 2),
+            )
+          : null,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(widget.icon, size: 14, color: colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (showStatus && status != null) ...[
+            const SizedBox(width: 6),
+            status,
+          ],
+          if (widget.expandable) ...[
+            const SizedBox(width: 4),
+            Icon(
+              isExpanded
+                  ? Icons.expand_less_rounded
+                  : Icons.expand_more_rounded,
+              size: 14,
+              color: colorScheme.onSurfaceVariant.withAlpha(150),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    final control = widget.expandable
+        ? FocusableActionDetector(
+            mouseCursor: SystemMouseCursors.click,
+            shortcuts: const <ShortcutActivator, Intent>{
+              SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+            },
+            actions: <Type, Action<Intent>>{
+              ActivateIntent: CallbackAction<ActivateIntent>(
+                onInvoke: (_) {
+                  _onTap();
+                  return null;
+                },
+              ),
+            },
+            onFocusChange: (focused) {
+              if (focused == _hasFocus) return;
+              setState(() => _hasFocus = focused);
+            },
+            onShowFocusHighlight: (show) {
+              if (show == _showFocusHighlight) return;
+              setState(() => _showFocusHighlight = show);
+            },
+            child: InkWell(
+              // The enclosing detector owns the single focus stop.
+              canRequestFocus: false,
+              // Expansion is its own feedback; a lingering ripple would sit
+              // behind the translucent pill.
+              splashFactory: NoSplash.splashFactory,
+              onTap: _onTap,
+              borderRadius: borderRadius,
+              child: pill,
+            ),
+          )
+        : pill;
+
+    // One node for the whole header: the pill's label, status and icons are
+    // covered by it, and the detector's focus is mirrored here so the node is a
+    // single focus stop.
+    return Semantics(
+      container: true,
+      excludeSemantics: true,
+      label: '${widget.label}, $_statusLabel',
+      button: widget.expandable,
+      expanded: isExpanded,
+      focusable: widget.expandable,
+      focused: widget.expandable ? _hasFocus : null,
+      onTap: widget.expandable ? _onTap : null,
+      child: control,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -215,88 +349,30 @@ class _TimelineEntryShellState extends State<TimelineEntryShell> {
 
     return Opacity(
       opacity: widget.entryState == EntryState.stale ? 0.6 : 1.0,
-      child: Semantics(
-        label: widget.label,
-        button: widget.expandable,
-        expanded: isExpanded,
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 2),
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GestureDetector(
-                  onTap: widget.expandable ? _onTap : null,
-                  child: Container(
-                    key: TimelineEntryShell.headerKey,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest.withAlpha(120),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    // Painted over the pill so the accent moves no layout.
-                    foregroundDecoration: awaitingInput
-                        ? BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: colorScheme.primary,
-                              width: 1.5,
-                            ),
-                          )
-                        : null,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          widget.icon,
-                          size: 14,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            widget.label,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colorScheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (showStatus && status != null) ...[
-                          const SizedBox(width: 6),
-                          status,
-                        ],
-                        if (widget.expandable) ...[
-                          const SizedBox(width: 4),
-                          Icon(
-                            isExpanded
-                                ? Icons.expand_less_rounded
-                                : Icons.expand_more_rounded,
-                            size: 14,
-                            color: colorScheme.onSurfaceVariant.withAlpha(150),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                _collapsible(
-                  colorScheme,
-                  animate: !reducedMotion,
-                  isExpanded: isExpanded,
-                ),
-                if (footer != null)
-                  SizedBox(width: double.infinity, child: footer),
-              ],
-            ),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _header(
+                colorScheme,
+                isExpanded: isExpanded,
+                showStatus: showStatus,
+                status: status,
+                awaitingInput: awaitingInput,
+              ),
+              _collapsible(
+                colorScheme,
+                animate: !reducedMotion,
+                isExpanded: isExpanded,
+              ),
+              if (footer != null)
+                SizedBox(width: double.infinity, child: footer),
+            ],
           ),
         ),
       ),

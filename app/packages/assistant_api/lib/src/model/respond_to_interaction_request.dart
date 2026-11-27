@@ -5,10 +5,12 @@
 // ignore_for_file: unused_element
 import 'package:assistant_api/src/model/tool_decision.dart';
 import 'package:assistant_api/src/model/question_answer.dart';
+import 'package:assistant_api/src/model/respond_to_interaction_request_one_of3.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of2.dart';
 import 'package:built_collection/built_collection.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of1.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request_one_of.dart';
+import 'package:built_value/json_object.dart';
 import 'package:built_value/built_value.dart';
 import 'package:built_value/serializer.dart';
 import 'package:one_of/one_of.dart';
@@ -21,11 +23,13 @@ part 'respond_to_interaction_request.g.dart';
 /// * [decision]
 /// * [kind]
 /// * [answers]
+/// * [action] - The action object: `name` (a Button action the surface declares), plus `sourceComponentId` and `context` when the client has them.
+/// * [dataModel] - The surface's data model at the time of the action.
 @BuiltValue()
 abstract class RespondToInteractionRequest
     implements
         Built<RespondToInteractionRequest, RespondToInteractionRequestBuilder> {
-  /// One Of [RespondToInteractionRequestOneOf], [RespondToInteractionRequestOneOf1], [RespondToInteractionRequestOneOf2]
+  /// One Of [RespondToInteractionRequestOneOf], [RespondToInteractionRequestOneOf1], [RespondToInteractionRequestOneOf2], [RespondToInteractionRequestOneOf3]
   OneOf get oneOf;
 
   RespondToInteractionRequest._();
@@ -82,6 +86,7 @@ class _$RespondToInteractionRequestSerializer
       FullType(RespondToInteractionRequestOneOf),
       FullType(RespondToInteractionRequestOneOf1),
       FullType(RespondToInteractionRequestOneOf2),
+      FullType(RespondToInteractionRequestOneOf3),
     ]);
     oneOfDataSrc = serialized;
     result.oneOf = serializers.deserialize(oneOfDataSrc,

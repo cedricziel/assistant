@@ -40,6 +40,26 @@ Annotated examples are `server.toml` and `org.toml` at the repo root. Release
 archives and packages include them, and Docker images put them at
 `/etc/assistant/server.toml.example` and `/etc/assistant/org.toml.example`.
 
+### Models for regenerate
+
+`[llm] available_models` is an optional list of model names. The web UI
+offers them next to `[llm] model` when a member regenerates a reply, and
+`GET /api/models` returns them with the default first. A model that is not
+the default or on the list is rejected with 400.
+
+```toml
+[llm]
+model = "claude-sonnet-4"
+available_models = ["claude-opus-4", "gpt-5"]
+```
+
+Every model runs with the org's provider kind, endpoint and credentials, so
+list only names that provider serves. The list is the cost control: any
+member with write access to a space may use any listed model, so an admin
+decides what is offered by editing `org.toml`. The choice applies to that one
+reply and does not change the conversation's `/model` setting. Unset, only
+the default model is offered.
+
 ### Embeddings
 
 `[llm] embedding_model` is optional. Unset, the chat provider's default

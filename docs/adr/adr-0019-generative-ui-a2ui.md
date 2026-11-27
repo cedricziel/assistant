@@ -235,7 +235,11 @@ handler accepts only an action whose name a Button in that surface declares. A
 resolved interaction marks the surface `submitted` and returns the action (and
 the data model, when `send_data_model` is set) as the observation. Decline,
 expiry and cancel leave the surface `active`, with matching observations for the
-model. The expiry is the interaction timeout ADR-0017 defines.
+model. The expiry is the interaction timeout ADR-0017 defines. The request
+carries `{surface_id, tool_call_id, title, actions, send_data_model}`: the
+declared action names travel with it because a kind handler validates
+synchronously and has no store access. An in-turn answer is carried by no user
+message, so `mark_submitted` gets a fresh unique id as its `action_message_id`.
 
 **Post-turn.** `SendMessageRequest` gains an optional `surface_action` (surface
 id, action name, source component id, context, optional data model). When it is
