@@ -1,7 +1,7 @@
 [package]
 name = "assistant-a2ui"
 description = "A2UI v1.0 message types and the assistant component catalog"
-version = "0.3.0"
+version = "0.3.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
