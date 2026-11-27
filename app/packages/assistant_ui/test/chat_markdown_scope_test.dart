@@ -109,6 +109,33 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('onCopyCode defaults to null', (tester) async {
+      final scope = ChatMarkdownScope(child: const SizedBox.shrink());
+
+      expect(scope.onCopyCode, isNull);
+    });
+
+    testWidgets('a CodeBlock without onCopy uses the scope callback', (
+      tester,
+    ) async {
+      final copied = <String>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatMarkdownScope(
+              onCopyCode: copied.add,
+              child: const CodeBlock(code: 'fn main() {}', language: 'rust'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.bySemanticsLabel('Copy code'));
+      await tester.pump();
+
+      expect(copied, ['fn main() {}']);
+    });
+
     testWidgets('exposes the style sheet override', (tester) async {
       final sheet = MarkdownStyleSheet.light();
       late ChatMarkdownScope? found;

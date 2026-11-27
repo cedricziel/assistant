@@ -152,6 +152,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.dispose();
   }
 
+  /// Copies [code] to the clipboard and announces it, so the result of the
+  /// markdown code block's copy button is also heard.
+  Future<void> _copyCode(String code) async {
+    await Clipboard.setData(ClipboardData(text: code));
+    if (!mounted) return;
+    ref.read(chatAnnouncerProvider).say('Code copied');
+  }
+
   Future<void> _sendMessage() async {
     final text = _inputController.text.trim();
     final pending = ref.read(pendingAttachmentsProvider);
@@ -600,6 +608,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         );
       },
     );
-    return ChatMarkdownConfig(child: thread);
+    return ChatMarkdownConfig(onCopyCode: _copyCode, child: thread);
   }
 }
