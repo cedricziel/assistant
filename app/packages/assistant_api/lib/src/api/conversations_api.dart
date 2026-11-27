@@ -23,6 +23,7 @@ import 'package:assistant_api/src/model/message_feedback_response.dart';
 import 'package:assistant_api/src/model/quick_message_request.dart';
 import 'package:assistant_api/src/model/quick_message_response.dart';
 import 'package:assistant_api/src/model/read_mcp_app_resource_request.dart';
+import 'package:assistant_api/src/model/regenerate_message_request.dart';
 import 'package:assistant_api/src/model/respond_to_interaction_request.dart';
 import 'package:assistant_api/src/model/set_message_feedback_request.dart';
 import 'package:assistant_api/src/model/switch_branch_request.dart';
@@ -1300,6 +1301,7 @@ class ConversationsApi {
   /// * [id] - Conversation ID
   /// * [messageId] - A user message, or any row of the reply to regenerate
   /// * [xSpaceId] - Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.
+  /// * [regenerateMessageRequest] - Optional: the model to answer with
   /// * [cancelToken] - A [CancelToken] that can be used to cancel the operation
   /// * [headers] - Can be used to add additional headers to the request
   /// * [extras] - Can be used to add flags to the request
@@ -1313,6 +1315,7 @@ class ConversationsApi {
     required String id,
     required String messageId,
     String? xSpaceId,
+    RegenerateMessageRequest? regenerateMessageRequest,
     CancelToken? cancelToken,
     Map<String, dynamic>? headers,
     Map<String, dynamic>? extra,
@@ -1346,11 +1349,33 @@ class ConversationsApi {
         ],
         ...?extra,
       },
+      contentType: 'application/json',
       validateStatus: validateStatus,
     );
 
+    dynamic _bodyData;
+
+    try {
+      const _type = FullType(RegenerateMessageRequest);
+      _bodyData = regenerateMessageRequest == null
+          ? null
+          : _serializers.serialize(regenerateMessageRequest,
+              specifiedType: _type);
+    } catch (error, stackTrace) {
+      throw DioException(
+        requestOptions: _options.compose(
+          _dio.options,
+          _path,
+        ),
+        type: DioExceptionType.unknown,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
     final _response = await _dio.request<Object>(
       _path,
+      data: _bodyData,
       options: _options,
       cancelToken: cancelToken,
       onSendProgress: onSendProgress,

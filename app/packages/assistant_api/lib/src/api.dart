@@ -23,6 +23,7 @@ import 'package:assistant_api/src/api/integrations_api.dart';
 import 'package:assistant_api/src/api/interfaces_api.dart';
 import 'package:assistant_api/src/api/members_api.dart';
 import 'package:assistant_api/src/api/messages_api.dart';
+import 'package:assistant_api/src/api/models_api.dart';
 import 'package:assistant_api/src/api/oauth_api.dart';
 import 'package:assistant_api/src/api/orgs_api.dart';
 import 'package:assistant_api/src/api/personas_api.dart';
@@ -239,6 +240,12 @@ class AssistantApi {
   /// by doing that all interceptors will not be executed
   MessagesApi getMessagesApi() {
     return MessagesApi(dio, serializers);
+  }
+
+  /// Get ModelsApi instance, base route and serializer can be overridden by a given but be careful,
+  /// by doing that all interceptors will not be executed
+  ModelsApi getModelsApi() {
+    return ModelsApi(dio, serializers);
   }
 
   /// Get OauthApi instance, base route and serializer can be overridden by a given but be careful,

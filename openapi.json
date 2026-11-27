@@ -2374,6 +2374,23 @@
             }
           }
         ],
+        "requestBody": {
+          "description": "Optional: the model to answer with",
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RegenerateMessageRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "SSE stream of assistant tokens and final message",
@@ -2382,7 +2399,7 @@
             }
           },
           "400": {
-            "description": "Invalid ID, or no user message to answer",
+            "description": "Invalid ID, a model that is not offered, or no user message to answer",
             "content": {
               "application/json": {
                 "schema": {
@@ -3894,6 +3911,49 @@
           },
           "503": {
             "description": "TTS not configured"
+          }
+        },
+        "security": [
+          {
+            "bearer_token": []
+          }
+        ]
+      }
+    },
+    "/api/models": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "`GET /api/models` — list the models a reply may be regenerated with.",
+        "operationId": "list_models",
+        "parameters": [
+          {
+            "name": "X-Space-Id",
+            "in": "header",
+            "description": "Id of the space to act in (from `GET /api/orgs/{org_id}/spaces`). Optional when the caller holds a role in exactly one space. Clients that cannot set headers, such as the browser `EventSource`, may send the same value as the `space_id` query parameter.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The default model first, then each listed model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ModelSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
         "security": [
@@ -13712,6 +13772,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model that produced this reply. Present on assistant messages\nsaved with it recorded."
+          },
           "parent_id": {
             "type": [
               "string",
@@ -13811,6 +13878,24 @@
             "format": "int64",
             "description": "Turn start to just before the final answer was saved, in milliseconds.",
             "minimum": 0
+          }
+        }
+      },
+      "ModelSummary": {
+        "type": "object",
+        "description": "One model offered for a regenerated reply.",
+        "required": [
+          "name",
+          "is_default"
+        ],
+        "properties": {
+          "is_default": {
+            "type": "boolean",
+            "description": "Whether this is the org's default model."
+          },
+          "name": {
+            "type": "string",
+            "description": "The model name, as the provider knows it."
           }
         }
       },
@@ -14517,6 +14602,19 @@
           }
         },
         "additionalProperties": false
+      },
+      "RegenerateMessageRequest": {
+        "type": "object",
+        "description": "Body for `POST /api/conversations/{id}/messages/{message_id}/regenerate`.\nThe body may be omitted, which regenerates on the default model.",
+        "properties": {
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model to answer with: the org's default model or an entry of\n`[llm] available_models`. It applies to this reply only."
+          }
+        }
       },
       "RegisterAgentRequest": {
         "type": "object",
@@ -17040,6 +17138,10 @@
     }
   },
   "tags": [
+    {
+      "name": "models",
+      "description": "Models a reply may be regenerated with"
+    },
     {
       "name": "capabilities",
       "description": "Server capabilities — query which optional features (voice, TTS) are enabled"
