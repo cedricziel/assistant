@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _kNotifyChatMessages = 'notifications.chat_messages';
 const _kNotifySkillComplete = 'notifications.skill_complete';
 const _kNotifyAgentErrors = 'notifications.agent_errors';
+const _kNotifyApprovalRequests = 'notifications.approval_requests';
 
 /// Persistent notification preferences backed by [SharedPreferences].
 class NotificationPreferences {
@@ -25,6 +26,12 @@ class NotificationPreferences {
 
   Future<void> setNotifyAgentErrors(bool value) =>
       _prefs.setBool(_kNotifyAgentErrors, value);
+
+  bool get notifyApprovalRequests =>
+      _prefs.getBool(_kNotifyApprovalRequests) ?? true;
+
+  Future<void> setNotifyApprovalRequests(bool value) =>
+      _prefs.setBool(_kNotifyApprovalRequests, value);
 }
 
 // -- Provider ----------------------------------------------------------------

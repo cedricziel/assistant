@@ -282,6 +282,30 @@ There are no org-level fallback starters. A Persona without starters shows the
 default empty-chat copy; an admin who wants starters everywhere sets them on
 the org-owned Personas.
 
+### Rating replies
+
+Every finished assistant reply carries thumbs up and thumbs down in its action
+row. The buttons appear once the reply has content and a server-assigned id,
+so a streaming reply or one still on the client-only `assistant-<timestamp>`
+fallback has none. A reply the user already rated shows the matching thumb
+selected when the conversation loads.
+
+Choosing either thumb opens an optional comment field below the actions.
+Submitting sends the rating with the trimmed comment; dismissing keeps the
+rating without a comment. Choosing the other thumb sends the new rating
+without the old comment and reopens the field empty. Tapping the selected
+thumb clears the vote and closes the field.
+
+The app updates the selection immediately and reconciles with the server
+afterwards. A failed request rolls the reply back to the last confirmed vote
+and shows a snackbar. While requests for a reply are queued, its local vote
+wins over a history reload.
+
+Comment text stays in the space database. It is never exported to telemetry;
+the `gen_ai.evaluation.result` event only records whether a comment exists
+(`assistant.feedback.has_comment`). See
+[opentelemetry.md](opentelemetry.md) for the event and metric reference.
+
 ## REST API (`/api/*`)
 
 These endpoints power the Flutter app and are also consumable directly:

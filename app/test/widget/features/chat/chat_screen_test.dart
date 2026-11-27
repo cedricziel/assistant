@@ -18,11 +18,14 @@ import 'package:assistant_ui/assistant_ui.dart'
         ApprovalCard,
         CodeBlock,
         CodeFileResultView,
+        FeedbackButtons,
+        MessageActionButton,
         QuestionCard,
         TimelineEntryShell,
         TimelineEntryView,
         TurnProgressCard;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -85,6 +88,84 @@ class _FakeConversationListNotifier extends ConversationListNotifier {
   void prependConversation(ConversationSummary conv) {}
 }
 
+typedef _FeedbackCall = ({String messageId, String? rating, String? comment});
+
+/// Records feedback calls made by the chat notifier; with [fail] set every
+/// call fails as if the server had rejected it.
+class _FakeFeedbackConversationsApi extends ConversationsApi {
+  _FakeFeedbackConversationsApi() : super(Dio(), standardSerializers);
+
+  final List<_FeedbackCall> calls = [];
+  bool fail = false;
+
+  DioException _rejected() => DioException(
+    requestOptions: RequestOptions(path: '/feedback'),
+    type: DioExceptionType.badResponse,
+  );
+
+  @override
+  Future<Response<MessageFeedbackResponse>> setMessageFeedback({
+    required String id,
+    required String messageId,
+    required SetMessageFeedbackRequest setMessageFeedbackRequest,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    calls.add((
+      messageId: messageId,
+      rating: setMessageFeedbackRequest.rating.name,
+      comment: setMessageFeedbackRequest.comment,
+    ));
+    if (fail) throw _rejected();
+    return Response(
+      requestOptions: RequestOptions(path: '/feedback'),
+      statusCode: 200,
+      data: MessageFeedbackResponse(
+        (b) => b
+          ..messageId = messageId
+          ..rating = setMessageFeedbackRequest.rating
+          ..comment = setMessageFeedbackRequest.comment
+          ..createdAt = DateTime(2024)
+          ..updatedAt = DateTime(2024),
+      ),
+    );
+  }
+
+  @override
+  Future<Response<void>> deleteMessageFeedback({
+    required String id,
+    required String messageId,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    calls.add((messageId: messageId, rating: null, comment: null));
+    if (fail) throw _rejected();
+    return Response(
+      requestOptions: RequestOptions(path: '/feedback'),
+      statusCode: 204,
+    );
+  }
+}
+
+class _FakeFeedbackApiClient extends ApiClient {
+  _FakeFeedbackApiClient() : super(baseUrl: 'http://fake', token: 'test');
+
+  final _FakeFeedbackConversationsApi fake = _FakeFeedbackConversationsApi();
+
+  @override
+  ConversationsApi get conversations => fake;
+}
+
 // ---------------------------------------------------------------------------
 // Widget builder — wraps ChatScreen in MaterialApp with provider fakes.
 
@@ -92,6 +173,7 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
   WidgetTester tester, {
   ServerCapabilities? capabilities,
   ValueNotifier<String?>? conversationId,
+  ApiClient? apiClient,
 }) async {
   final chatNotifier = _FakeChatNotifier();
 
@@ -119,6 +201,7 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
           ),
           capabilitiesProvider.overrideWith((ref) async => capabilities),
         ],
+        if (apiClient != null) apiClientProvider.overrideWithValue(apiClient),
       ],
       child: MaterialApp(
         home: ValueListenableBuilder<String?>(
@@ -1710,6 +1793,130 @@ void main() {
         findsNothing,
         reason: 'Dots must disappear once content starts streaming',
       );
+    });
+  });
+
+  group('Chat screen — message feedback', () {
+    ChatMessage reply(String id, {MessageFeedback? feedback}) =>
+        ChatMessage(id: id, role: 'assistant', content: 'Answer $id')
+          ..feedback = feedback;
+
+    MessageActionButton button(WidgetTester tester, String key) =>
+        tester.widget<MessageActionButton>(find.byKey(Key(key)));
+
+    Future<_FakeChatNotifier> pumpSeeded(
+      WidgetTester tester,
+      _FakeFeedbackApiClient api, {
+      List<ChatMessage>? messages,
+    }) async {
+      final result = await pumpChatScreen(tester, apiClient: api);
+      result.notifier.push(
+        ChatState(
+          conversationId: 'conv-1',
+          messages:
+              messages ??
+              [
+                reply(
+                  'm1',
+                  feedback: const MessageFeedback(
+                    rating: MessageRating.positive,
+                  ),
+                ),
+              ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      return result.notifier;
+    }
+
+    testWidgets('a history vote is selected and negative reopens the field', (
+      tester,
+    ) async {
+      final api = _FakeFeedbackApiClient();
+      await pumpSeeded(tester, api);
+
+      expect(
+        find.byType(FeedbackButtons),
+        findsOneWidget,
+        reason: 'persisted assistant replies carry thumbs',
+      );
+      expect(button(tester, 'feedback_positive_action').selected, isTrue);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('feedback_comment_input')), findsOneWidget);
+      expect(button(tester, 'feedback_negative_action').selected, isTrue);
+      expect(api.fake.calls.last.rating, 'negative');
+      expect(api.fake.calls.last.comment, isNull);
+    });
+
+    testWidgets('submitting a comment sends it and closes the field', (
+      tester,
+    ) async {
+      final api = _FakeFeedbackApiClient();
+      await pumpSeeded(tester, api);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('feedback_comment_input')),
+        ' wrong file ',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('feedback_comment_send')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('feedback_comment_input')), findsNothing);
+      expect(api.fake.calls.last.rating, 'negative');
+      expect(api.fake.calls.last.comment, 'wrong file');
+    });
+
+    testWidgets('dismissing the field keeps the vote', (tester) async {
+      final api = _FakeFeedbackApiClient();
+      await pumpSeeded(tester, api);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('feedback_comment_dismiss')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('feedback_comment_input')), findsNothing);
+      expect(button(tester, 'feedback_negative_action').selected, isTrue);
+    });
+
+    testWidgets('a second message opens its own field', (tester) async {
+      final api = _FakeFeedbackApiClient();
+      await pumpSeeded(tester, api, messages: [reply('m1'), reply('m2')]);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')).first);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('feedback_comment_input')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')).at(1));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('feedback_comment_input')), findsNWidgets(2));
+    });
+
+    testWidgets('a server error shows a snackbar and restores the vote', (
+      tester,
+    ) async {
+      final api = _FakeFeedbackApiClient()..fake.fail = true;
+      await pumpSeeded(tester, api);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(
+        find.text('Could not save your feedback. Please try again.'),
+        findsOneWidget,
+      );
+      expect(button(tester, 'feedback_positive_action').selected, isTrue);
+      expect(button(tester, 'feedback_negative_action').selected, isFalse);
+
+      // Let the snackbar's auto-dismiss timer run before teardown.
+      await tester.pump(const Duration(seconds: 5));
     });
   });
 
