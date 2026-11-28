@@ -42,16 +42,16 @@ Layer: server
 Depends on: none
 Parallel with: PR 3, PR 5
 
-- [ ] 1.1 RED: add `crates/storage/tests/contract/message_feedback_store.rs`, registered in `tests/contract.rs`, running against both impls:
+- [x] 1.1 RED: add `crates/storage/tests/contract/message_feedback_store.rs`, registered in `tests/contract.rs`, running against both impls:
   - set then get;
   - set twice keeps `created_at` and advances `updated_at` (with a fake `Clock`);
   - two concurrent sets on the same pair both succeed and leave one row whose `created_at` is the first writer's;
   - `clear` returns `true` and removes the row; a second `clear` returns `Ok(false)`;
   - `list_for_conversation(conv, user)` returns only that user's rows;
   - SQLite only: deleting the conversation cascades; `set` on an unknown message id returns an error (in-memory exemption documented in design.md D1).
-- [ ] 1.2 Add migration `message_feedback.sql` (design.md D1; number from the stack plan, 050) and register it in `run_migrations` (`crates/storage/src/lib.rs:297`).
-- [ ] 1.3 Add `crates/storage/src/message_feedback.rs` with `MessageFeedbackRating { Positive, Negative }`, `MessageFeedbackRow`, the `MessageFeedbackStore` trait (`set`, `clear -> Result<bool>`, `get`, `list_for_conversation`). `SqliteMessageFeedbackStore::set` is one `INSERT … ON CONFLICT (message_id, user_id) DO UPDATE` that never updates `created_at`. Add `InMemoryMessageFeedbackStore`; both take `with_clock`, following `command_events.rs`. Export from `lib.rs`, add `StorageLayer::message_feedback_store()`, and re-export through `assistant_test_support::prelude` (`crates/test-support/src/prelude.rs:28`). Confirm GREEN.
-- [ ] 1.4 Panic-free check: no `unwrap`/`expect` outside `#[cfg(test)]`; `cargo clippy -p assistant-storage -D warnings`.
+- [x] 1.2 Add migration `message_feedback.sql` (design.md D1; number from the stack plan, 050) and register it in `run_migrations` (`crates/storage/src/lib.rs:297`).
+- [x] 1.3 Add `crates/storage/src/message_feedback.rs` with `MessageFeedbackRating { Positive, Negative }`, `MessageFeedbackRow`, the `MessageFeedbackStore` trait (`set`, `clear -> Result<bool>`, `get`, `list_for_conversation`). `SqliteMessageFeedbackStore::set` is one `INSERT … ON CONFLICT (message_id, user_id) DO UPDATE` that never updates `created_at`. Add `InMemoryMessageFeedbackStore`; both take `with_clock`, following `command_events.rs`. Export from `lib.rs`, add `StorageLayer::message_feedback_store()`, and re-export through `assistant_test_support::prelude` (`crates/test-support/src/prelude.rs:28`). Confirm GREEN.
+- [x] 1.4 Panic-free check: no `unwrap`/`expect` outside `#[cfg(test)]`; `cargo clippy -p assistant-storage -D warnings`.
 
 ## PR 2a — feat(web-ui): message feedback PUT and DELETE endpoints
 
@@ -59,7 +59,7 @@ Layer: both (server route + generated client)
 Depends on: PR 1
 Parallel with: PR 2b, PR 3, PR 5
 
-- [ ] 2a.1 RED: handler tests in `crates/web-ui/src/api/feedback.rs` using `test_helpers::seed_conversation` (`test_helpers.rs:248`). Every non-2xx case asserts the `{"error"}` JSON body:
+- [x] 2a.1 RED: handler tests in `crates/web-ui/src/api/feedback.rs` using `test_helpers::seed_conversation` (`test_helpers.rs:248`). Every non-2xx case asserts the `{"error"}` JSON body:
   - PUT positive → 200 with no `comment` field;
   - PUT replace with comment → 200 and the stored comment;
   - a whitespace-only comment is stored as none;
@@ -71,9 +71,9 @@ Parallel with: PR 2b, PR 3, PR 5
   - viewer → 403 on PUT and on DELETE;
   - non-admin without `conversations:write` → 403; org admin without the scope → 200;
   - DELETE → 204 twice.
-- [ ] 2a.2 Add `owned_conversation_json` beside `owned_conversation` (`conversations.rs:50`), mapping its errors through `json_error` (`crates/web-ui/src/errors.rs:25`).
-- [ ] 2a.3 Implement `set_message_feedback` and `delete_message_feedback` (design.md D2) with `SetMessageFeedbackRequest`, `MessageFeedbackResponse` and the rating enum (`#[serde(rename_all = "snake_case")]`, `ToSchema`). Take the body as `Result<Json<_>, JsonRejection>` and map **every** rejection to `json_error(StatusCode::BAD_REQUEST, rejection.body_text())`; do not use `From<JsonRejection> for ApiError` (`integrations/error.rs:79-82`, which yields 422/415). Use `Access::Write` plus `caller_can_post` (`messages.rs:43-50`). Count the comment with `chars()`. Register both routes in `api_router` (`crates/web-ui/src/api/mod.rs:238`) and in the `OpenApi` paths and schemas (`crates/web-ui/src/openapi.rs:276`, `:438`), documenting 400/403/404 with `ErrorBody`. Confirm GREEN.
-- [ ] 2a.4 Run `make dump-openapi` and `make generate-flutter-client`. Commit `openapi.json` and the generated diff (generated-only: request, response and rating enum). Verify the `openapi.rs` X-Space-Id test (`openapi.rs:831`) passes and `flutter analyze --fatal-infos` is green.
+- [x] 2a.2 Add `owned_conversation_json` beside `owned_conversation` (`conversations.rs:50`), mapping its errors through `json_error` (`crates/web-ui/src/errors.rs:25`).
+- [x] 2a.3 Implement `set_message_feedback` and `delete_message_feedback` (design.md D2) with `SetMessageFeedbackRequest`, `MessageFeedbackResponse` and the rating enum (`#[serde(rename_all = "snake_case")]`, `ToSchema`). Take the body as `Result<Json<_>, JsonRejection>` and map **every** rejection to `json_error(StatusCode::BAD_REQUEST, rejection.body_text())`; do not use `From<JsonRejection> for ApiError` (`integrations/error.rs:79-82`, which yields 422/415). Use `Access::Write` plus `caller_can_post` (`messages.rs:43-50`). Count the comment with `chars()`. Register both routes in `api_router` (`crates/web-ui/src/api/mod.rs:238`) and in the `OpenApi` paths and schemas (`crates/web-ui/src/openapi.rs:276`, `:438`), documenting 400/403/404 with `ErrorBody`. Confirm GREEN.
+- [x] 2a.4 Run `make dump-openapi` and `make generate-flutter-client`. Commit `openapi.json` and the generated diff (generated-only: request, response and rating enum). Verify the `openapi.rs` X-Space-Id test (`openapi.rs:831`) passes and `flutter analyze --fatal-infos` is green.
 
 ## PR 2b — feat(web-ui): project caller feedback into conversation history
 
@@ -81,9 +81,9 @@ Layer: both (server projection + generated client)
 Depends on: PR 1
 Parallel with: PR 2a, PR 3, PR 5
 
-- [ ] 2b.1 RED: a `get_conversation` test. A rated assistant message carries `feedback {rating, comment, updated_at}`. Unrated messages omit the key. Another user's vote is not visible.
-- [ ] 2b.2 Add `MessageFeedbackSummary` and `feedback: Option<_>` (`skip_serializing_if`) to `MessageSummary` (`conversations.rs:105`). Load it once per request with `list_for_conversation` into a `HashMap`, next to the attachments preload (`conversations.rs:424`). Register the schema in `openapi.rs`. Confirm GREEN.
-- [ ] 2b.3 Run `make dump-openapi` and `make generate-flutter-client`; commit both (generated-only: `MessageFeedbackSummary`, `MessageSummary.feedback`).
+- [x] 2b.1 RED: a `get_conversation` test. A rated assistant message carries `feedback {rating, comment, updated_at}`. Unrated messages omit the key. Another user's vote is not visible.
+- [x] 2b.2 Add `MessageFeedbackSummary` and `feedback: Option<_>` (`skip_serializing_if`) to `MessageSummary` (`conversations.rs:105`). Load it once per request with `list_for_conversation` into a `HashMap`, next to the attachments preload (`conversations.rs:424`). Register the schema in `openapi.rs`. Confirm GREEN.
+- [x] 2b.3 Run `make dump-openapi` and `make generate-flutter-client`; commit both (generated-only: `MessageFeedbackSummary`, `MessageSummary.feedback`).
 
 ## PR 3 — feat(runtime): record LLM span traceparent on assistant replies
 
@@ -104,17 +104,17 @@ Layer: server
 Depends on: PR 2a, PR 3
 Parallel with: PR 2b, PR 5, PR 7a, PR 7b
 
-- [ ] 4.1 RED: plain `#[test]` unit tests in `crates/runtime/src/otel_spans.rs` using a **local** `SdkLoggerProvider` with `InMemoryLogExporter`, wired through `OpenTelemetryTracingBridge` under `tracing::subscriber::with_default` (no global state). `record_user_feedback` with a stored traceparent exports one record with:
+- [x] 4.1 RED: plain `#[test]` unit tests in `crates/runtime/src/otel_spans.rs` using a **local** `SdkLoggerProvider` with `InMemoryLogExporter`, wired through `OpenTelemetryTracingBridge` under `tracing::subscriber::with_default` (no global state). `record_user_feedback` with a stored traceparent exports one record with:
   - `event_name` `gen_ai.evaluation.result` and the traceparent's trace and span id;
   - `score.label` `negative` and `score.value` -1.0;
   - `gen_ai.conversation.id`, `gen_ai.agent.id`, `assistant.message.id`, `assistant.feedback.has_comment`;
   - no `gen_ai.evaluation.explanation`, and no attribute value contains the comment text.
     Further cases: a rating with a comment sets `has_comment` true and exports no comment text for either `positive` or `negative`; a rating without a comment sets `has_comment` false; `cleared` → no `score.value` and a `cleared` label; no traceparent → no trace context. If the bridge does not set `event_name` or trace context, apply the fallback from design.md D3.
-- [ ] 4.2 Implement `FeedbackTelemetry { …, has_comment }` (no comment field, so comment text cannot reach the exporter) and `record_user_feedback`, parsing the stored value with a local `TraceContextPropagator::new()`. Attribute names are constants next to `GEN_AI_*` (`otel_spans.rs:28`). Add `assistant.feedback.count{rating, agent_id}` to `MetricsRecorder` (`metrics.rs:26`) with a unit test. Confirm GREEN.
-- [ ] 4.3 RED: web-ui handler tests with a recording `FeedbackTelemetrySink` on `ApiState`. PUT calls the sink with `positive`/`negative` and the stored traceparent. DELETE of an existing vote calls it with `cleared`. DELETE with nothing stored does not call it. A sink failure still returns 200 or 204. The recorded call carries `has_comment` and no comment text, with and without a comment in the request.
-- [ ] 4.4 Add `OtelFeedbackTelemetrySink` in runtime, which owns its own `MetricsRecorder::new()` and calls `record_user_feedback`. Wire the handlers: read the message's `traceparent` and emit only when `set` succeeded or `clear` returned `true`. Confirm GREEN.
-- [ ] 4.5 Amend `docs/adr/adr-0012-otlp-only-telemetry.md` with a dated section: persisted domain rows may carry a W3C traceparent so later out-of-band events are emitted as span-parented log records; list the alternatives from design.md D3.
-- [ ] 4.6 Document the event, its attributes, the `cleared` semantics (no score value), that comment text is never exported (only `has_comment`) and the metric (counts events, `rating` values) in `docs/opentelemetry.md` and the "What is emitted" list of `.claude/skills/observability/SKILL.md`.
+- [x] 4.2 Implement `FeedbackTelemetry { …, has_comment }` (no comment field, so comment text cannot reach the exporter) and `record_user_feedback`, parsing the stored value with a local `TraceContextPropagator::new()`. Attribute names are constants next to `GEN_AI_*` (`otel_spans.rs:28`). Add `assistant.feedback.count{rating, agent_id}` to `MetricsRecorder` (`metrics.rs:26`) with a unit test. Confirm GREEN.
+- [x] 4.3 RED: web-ui handler tests with a recording `FeedbackTelemetrySink` on `ApiState`. PUT calls the sink with `positive`/`negative` and the stored traceparent. DELETE of an existing vote calls it with `cleared`. DELETE with nothing stored does not call it. A sink failure still returns 200 or 204. The recorded call carries `has_comment` and no comment text, with and without a comment in the request.
+- [x] 4.4 Add `OtelFeedbackTelemetrySink` in runtime, which owns its own `MetricsRecorder::new()` and calls `record_user_feedback`. Wire the handlers: read the message's `traceparent` and emit only when `set` succeeded or `clear` returned `true`. Confirm GREEN.
+- [x] 4.5 Amend `docs/adr/adr-0012-otlp-only-telemetry.md` with a dated section: persisted domain rows may carry a W3C traceparent so later out-of-band events are emitted as span-parented log records; list the alternatives from design.md D3.
+- [x] 4.6 Document the event, its attributes, the `cleared` semantics (no score value), that comment text is never exported (only `has_comment`) and the metric (counts events, `rating` values) in `docs/opentelemetry.md` and the "What is emitted" list of `.claude/skills/observability/SKILL.md`.
 
 ## PR 5 — feat(app): FeedbackButtons and FeedbackCommentField elements
 
@@ -122,22 +122,22 @@ Layer: client
 Depends on: chat-element-library PR 3 (widgetbook registry) and PR 8a (`MessageActionButton.selected`, list `trailing`)
 Parallel with: PR 1 to PR 4, PR 7a
 
-- [ ] 5.1 RED: `app/packages/assistant_ui/test/feedback_buttons_test.dart`, pumped with literal arguments and no `ProviderScope`:
+- [x] 5.1 RED: `app/packages/assistant_ui/test/feedback_buttons_test.dart`, pumped with literal arguments and no `ProviderScope`:
   - none → tap positive emits `positive`;
   - negative → tap negative emits `null`;
   - positive → tap negative emits `negative`;
   - semantics: selected on "Good response" only;
   - disabled → no callback;
   - keys `feedback_positive_action` and `feedback_negative_action` present.
-- [ ] 5.2 Add `MessageRating` to the package models and implement `FeedbackButtons` from `MessageActionButton` (icons `thumb_up_outlined`/`thumb_up` and `thumb_down_outlined`/`thumb_down`). Confirm GREEN.
-- [ ] 5.3 RED: `test/feedback_comment_field_test.dart`:
+- [x] 5.2 Add `MessageRating` to the package models and implement `FeedbackButtons` from `MessageActionButton` (icons `thumb_up_outlined`/`thumb_up` and `thumb_down_outlined`/`thumb_down`). Confirm GREEN.
+- [x] 5.3 RED: `test/feedback_comment_field_test.dart`:
   - Send trims and fires `onSubmit`;
   - Send is disabled while the field is empty and while `sending` is true;
   - Enter submits; Escape fires `onDismiss`;
   - the limit counts Unicode scalar values (2000 multi-scalar emoji scalars accepted, one more rejected);
   - `initialText` prefills.
-- [ ] 5.4 Implement `FeedbackCommentField` with a runes-counting input formatter. Confirm GREEN.
-- [ ] 5.5 Follow the chat-element-library element checklist: `kAssistantUiElements` entries; widgetbook use-cases (FeedbackButtons none, positive, negative, disabled; comment field empty, prefilled, sending); `golden`-tagged goldens in light and dark; `ELEMENTS.md` rows; the boundary test still green, with no new dependency.
+- [x] 5.4 Implement `FeedbackCommentField` with a runes-counting input formatter. Confirm GREEN.
+- [x] 5.5 Follow the chat-element-library element checklist: `kAssistantUiElements` entries; widgetbook use-cases (FeedbackButtons none, positive, negative, disabled; comment field empty, prefilled, sending); `golden`-tagged goldens in light and dark; `ELEMENTS.md` rows; the boundary test still green, with no new dependency.
 
 ## PR 7a — feat(app): message feedback model and controller
 
@@ -145,9 +145,9 @@ Layer: client
 Depends on: PR 2a, PR 2b
 Parallel with: PR 4, PR 5
 
-- [ ] 7a.1 RED: `app/test/unit/chat/chat_history_mapping_test.dart`. `MessageSummary.feedback` maps to `ChatMessage.feedback` (rating, comment); absent maps to `null`.
-- [ ] 7a.2 Add `MessageFeedback` and `ChatMessage.feedback` (`chat_models.dart:77`, or its package location after chat-element-library PR 4). Map it in `chatMessagesFromHistory` (`chat_history_mapping.dart:32`). Confirm GREEN.
-- [ ] 7a.3 RED: `app/test/unit/chat/message_feedback_provider_test.dart` with a fake API:
+- [x] 7a.1 RED: `app/test/unit/chat/chat_history_mapping_test.dart`. `MessageSummary.feedback` maps to `ChatMessage.feedback` (rating, comment); absent maps to `null`.
+- [x] 7a.2 Add `MessageFeedback` and `ChatMessage.feedback` (`chat_models.dart:77`, or its package location after chat-element-library PR 4). Map it in `chatMessagesFromHistory` (`chat_history_mapping.dart:32`). Confirm GREEN.
+- [x] 7a.3 RED: `app/test/unit/chat/message_feedback_provider_test.dart` with a fake API:
   - success: a set applies optimistically, then calls PUT; `confirmed` updates;
   - loading: while the call is in flight `isPending(id)` is true, and false after it settles;
   - error: a failure restores the rating and comment and reports an error;
@@ -159,7 +159,7 @@ Parallel with: PR 4, PR 5
   - a comment submit PUTs `{rating, comment}` for `positive` and for `negative`;
   - switching from `negative` with a stored comment to `positive` PUTs `{rating: positive}` without a comment, and the comment-field state resets;
   - dismissing the field sends nothing.
-- [ ] 7a.4 Implement `MessageFeedbackController` in `features/chat/message_feedback_provider.dart` (per-message `confirmed` plus serial queue), `ChatNotifier.setMessageFeedback(id, feedback)`, and one `_withPendingFeedback(messages)` merge applied at every list-replacement site in `chat_provider.dart` (`loadConversation` `:290-313`, stall recovery `:975-994`, reconnect fallback `:1078-1095`). Confirm GREEN.
+- [x] 7a.4 Implement `MessageFeedbackController` in `features/chat/message_feedback_provider.dart` (per-message `confirmed` plus serial queue), `ChatNotifier.setMessageFeedback(id, feedback)`, and one `_withPendingFeedback(messages)` merge applied at every list-replacement site in `chat_provider.dart` (`loadConversation` `:290-313`, stall recovery `:975-994`, reconnect fallback `:1078-1095`). Confirm GREEN.
 
 ## PR 7b — feat(app): show message feedback in the chat thread
 
@@ -167,11 +167,11 @@ Layer: client
 Depends on: PR 5, PR 7a, chat-element-library PR 8a and PR 8b, message-branching non-destructive compaction PR (D5; gates shipping the UI)
 Parallel with: PR 4
 
-- [ ] 7b.1 RED: a unit test for a pure `buildMessageTrailing(message, …) → List<Widget>` in `features/chat/message_actions_builder.dart` (beside chat-element-library's `buildMessageActions`). `FeedbackButtons` appear for a persisted assistant message entry, after any timing indicator (chat-a11y C11) when present. They are absent for user, streaming, failed and empty-content messages, for non-message timeline entries, and for an id starting `assistant-` (`chat_provider.dart:206`). If chat-a11y C11 has not landed, this PR creates the builder and C11 prepends to it.
-- [ ] 7b.2 Implement `buildMessageTrailing`, feed it to `MessageActions.trailing`, and render `FeedbackCommentField` (with `sending: isPending(id)`) below `MessageActions` after a vote of either rating. Switching rating reopens it empty; clearing closes it. Open state is local to the chat feature, keyed by message id. Confirm GREEN.
-- [ ] 7b.3 RED, then GREEN: a widget test on `ChatScreen` with a seeded history vote. The positive button renders selected. Tapping negative opens the comment field, and submitting closes it. Tapping positive on another message also opens it, and dismissing keeps the rating. A server error shows a snackbar and restores the selection.
-- [ ] 7b.4 Regression guard (passes once the dependency has merged, fails if destructive compaction returns): a runtime test that rates a message through `MessageFeedbackStore`, runs `maybe_compact` over the conversation, and asserts the vote still exists on the same message id.
-- [ ] 7b.5 Regenerate the Playwright baselines touched by the trailing buttons (`e2e-testing` skill) after rebasing; record the visual diff in the PR body.
-- [ ] 7b.6 Add a "Rating replies" section to `docs/web-ui.md`: thumbs, the optional comment after either vote, clearing a vote, and that comment text stays in the space database and is never exported to telemetry (only whether a comment exists).
-- [ ] 7b.7 Final phase: `make lint && make format && make test`, then `make lint-flutter && make test-flutter`.
-- [ ] 7b.8 After all PRs have merged, archive the change (`openspec archive message-feedback`), promoting `message-feedback` and `message-feedback-ui` into `openspec/specs/`.
+- [x] 7b.1 RED: a unit test for a pure `buildMessageTrailing(message, …) → List<Widget>` in `features/chat/message_actions_builder.dart` (beside chat-element-library's `buildMessageActions`). `FeedbackButtons` appear for a persisted assistant message entry, after any timing indicator (chat-a11y C11) when present. They are absent for user, streaming, failed and empty-content messages, for non-message timeline entries, and for an id starting `assistant-` (`chat_provider.dart:206`). If chat-a11y C11 has not landed, this PR creates the builder and C11 prepends to it.
+- [x] 7b.2 Implement `buildMessageTrailing`, feed it to `MessageActions.trailing`, and render `FeedbackCommentField` (with `sending: isPending(id)`) below `MessageActions` after a vote of either rating. Switching rating reopens it empty; clearing closes it. Open state is local to the chat feature, keyed by message id. Confirm GREEN.
+- [x] 7b.3 RED, then GREEN: a widget test on `ChatScreen` with a seeded history vote. The positive button renders selected. Tapping negative opens the comment field, and submitting closes it. Tapping positive on another message also opens it, and dismissing keeps the rating. A server error shows a snackbar and restores the selection.
+- [x] 7b.4 Regression guard (passes once the dependency has merged, fails if destructive compaction returns): a runtime test that rates a message through `MessageFeedbackStore`, runs `maybe_compact` over the conversation, and asserts the vote still exists on the same message id.
+- [x] 7b.5 Regenerate the Playwright baselines touched by the trailing buttons (`e2e-testing` skill) after rebasing; record the visual diff in the PR body.
+- [x] 7b.6 Add a "Rating replies" section to `docs/web-ui.md`: thumbs, the optional comment after either vote, clearing a vote, and that comment text stays in the space database and is never exported to telemetry (only whether a comment exists).
+- [x] 7b.7 Final phase: `make lint && make format && make test`, then `make lint-flutter && make test-flutter`.
+- [x] 7b.8 After all PRs have merged, archive the change (`openspec archive message-feedback`), promoting `message-feedback` and `message-feedback-ui` into `openspec/specs/`.
