@@ -251,7 +251,11 @@ const SURFACE_CAPABILITIES: &str = "\n\
      buttons the user can fill in and submit. Use one when the answer is a set of fields, \
      options or records that reads better as a widget than as prose. Always give it a \
      `fallback_text` that says in plain words what the surface shows, and update a surface \
-     you made earlier in the same turn with its `surface_id` instead of creating a second one.";
+     you made earlier in the same turn with its `surface_id` instead of creating a second one. \
+     Pass `wait_for_action: true` when you cannot finish without the user: the turn then \
+     waits for them to submit or dismiss the surface, and carries on with what they entered. \
+     Leave it off when the surface only reports something, or when their answer can arrive as \
+     a later message.";
 
 fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {
     let path = skill.dir.join("SKILL.md");
@@ -304,6 +308,29 @@ mod tests {
             caps.contains("fallback_text"),
             "the prompt says what to pass when a client cannot render the surface"
         );
+    }
+
+    #[test]
+    fn interactive_web_explains_when_to_wait_for_action() {
+        let caps = output_capabilities(&Interface::Web, true);
+        assert!(
+            caps.contains("wait_for_action: true"),
+            "the prompt names the flag"
+        );
+        assert!(
+            caps.contains("waits for them to submit"),
+            "the prompt says the turn waits for an answer"
+        );
+        assert!(
+            caps.contains("Leave it off"),
+            "the prompt says when not to wait"
+        );
+    }
+
+    #[test]
+    fn non_interactive_web_does_not_mention_waiting() {
+        let caps = output_capabilities(&Interface::Web, false);
+        assert!(!caps.contains("wait_for_action"), "{caps}");
     }
 
     #[test]
