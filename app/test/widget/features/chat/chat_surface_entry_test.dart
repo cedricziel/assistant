@@ -67,6 +67,42 @@ void main() {
     expect(find.byType(SurfaceFrame), findsOneWidget);
   });
 
+  testWidgets('a wide transcript caps the surface at the message width', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(_wrap(ChatTimelineEntry(message: _entry())));
+
+    final frame = find.byType(SurfaceFrame);
+    expect(
+      tester.getSize(frame).width,
+      640,
+      reason: 'a surface must not overhang the message column',
+    );
+    expect(
+      tester.getTopLeft(frame).dx,
+      0,
+      reason: 'the column is left-aligned',
+    );
+  });
+
+  testWidgets('a narrow transcript leaves the surface full width', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(412, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(_wrap(ChatTimelineEntry(message: _entry())));
+
+    expect(tester.getSize(find.byType(SurfaceFrame)).width, 412);
+  });
+
   testWidgets('a surface that is no longer answerable reads Closed', (
     tester,
   ) async {
