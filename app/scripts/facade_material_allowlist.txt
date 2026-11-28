@@ -20,6 +20,8 @@ lib/features/account/account_screen.dart
 lib/features/admin/admin_screen.dart
 lib/features/agents/agent_detail_screen.dart
 lib/features/api_keys/api_keys_screen.dart
+lib/features/chat/a2ui/assistant_image.dart
+lib/features/chat/a2ui/surface_theme.dart
 lib/features/chat/audio_player_widget.dart
 lib/features/chat/conversation_list.dart
 lib/features/chat/image_utils.dart

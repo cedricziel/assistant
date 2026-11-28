@@ -53,11 +53,20 @@ class ChatTimelineEntry extends StatelessWidget {
     if (message.timelineType == TimelineEntryType.surface) {
       final surface = message.surface;
       if (surface == null) return const SizedBox.shrink();
-      return SurfaceEntry(
-        surface: surface,
-        entryState: entryState,
-        pending: message.status == MessageStatus.sending,
-        onAction: onSurfaceAction,
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: SurfaceEntry(
+              surface: surface,
+              entryState: entryState,
+              pending: message.status == MessageStatus.sending,
+              onAction: onSurfaceAction,
+            ),
+          ),
+        ),
       );
     }
     return TimelineEntryView(

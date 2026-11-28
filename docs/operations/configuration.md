@@ -11,10 +11,10 @@ missing file means defaults.
 
 All paths are relative to `~/.assistant/`.
 
-| File                       | Scope             | Sections                                                                                                                                                                                                                                               |
-| -------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `server.toml`              | The whole process | `[bus]`, `[mcp]`, `[notifications]`                                                                                                                                                                                                                    |
-| `orgs/<org-slug>/org.toml` | One organization  | `[llm]` (including `[llm.embeddings]`), `[agent]`, `[skills]`, `[observability]`, `[memory]`, `[compaction]`, `[learning]`, `[titling]`, `[suggestions]`, `[permissions]`, `[signal]`, `[slack]`, `[mattermost]`, `[nextcloud]`, `[matrix]`, `[transcription]`, `[tts]` |
+| File                       | Scope             | Sections                                                                                                                                                                                                                                                                        |
+| -------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server.toml`              | The whole process | `[bus]`, `[mcp]`, `[notifications]`                                                                                                                                                                                                                                             |
+| `orgs/<org-slug>/org.toml` | One organization  | `[llm]` (including `[llm.embeddings]`), `[agent]`, `[skills]`, `[observability]`, `[memory]`, `[compaction]`, `[learning]`, `[titling]`, `[suggestions]`, `[permissions]`, `[ui]`, `[signal]`, `[slack]`, `[mattermost]`, `[nextcloud]`, `[matrix]`, `[transcription]`, `[tts]` |
 
 What the `server.toml` sections do:
 
@@ -130,6 +130,31 @@ timeout_secs = 10     # 1..=15; values outside are clamped; budget for the whole
   restored when a conversation is opened from history.
 
 Set `enabled = false` to turn the feature off. No call is made then.
+
+## Generative UI surfaces
+
+`[ui]` controls which hosts a generative-UI surface may use. Both lists are
+optional and empty by default. They apply to one org.
+
+```toml
+[ui]
+image_hosts = ["images.example.com"]
+link_hosts = ["docs.example.com"]
+```
+
+- **`image_hosts`** limits surface images to these `https:` hosts. Unset or
+  empty allows any `https:` host. A host that serves an image can see the
+  user's IP address and when the image loaded, so an org that cares should list
+  only hosts it trusts. Images attached to the conversation are always allowed.
+  The server enforces this list; clients never receive it.
+- **`link_hosts`** lists hosts whose `openUrl` links open without a
+  confirmation prompt. Entries are exact host names, matched without regard to
+  case. Unset or empty means every link asks first. This only skips the prompt;
+  it does not change the URL policy, which still allows only `https:` and
+  `mailto:` targets. The web app reads the list from `GET /api/capabilities`.
+
+See [Generative UI](../chat/generative-ui.md) for what surfaces are and how
+they behave.
 
 ## Checking your configuration
 

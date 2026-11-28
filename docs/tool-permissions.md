@@ -249,6 +249,7 @@ These tools run without a rule of yours:
 - `list-skills`, `load-skill`
 - `list-tasks`, `schedule-task`, `cancel-task`
 - `plan-update`
+- `render-surface`
 - `agent-spawn`, `agent-status`, `agent-terminate`
 - `self-analyze`, `voice-response`
 - `web-search`

@@ -1,9 +1,11 @@
 // A scripted stand-in for Ollama's /api/chat, so e2e turns run without a
 // model. A user question about the weather gets a call to the demo MCP
-// server's get-forecast tool; the tool's result gets a one-line answer; any
-// other request (such as the conversation title) gets a short title. A
-// message containing "hold this turn" gets no answer for a minute, so a client
-// can cancel the turn while it runs.
+// server's get-forecast tool; the tool's result gets a one-line answer. A
+// message containing "events surface" calls the real render-surface tool with
+// a surface whose Button opens an external link. Any other request (such as
+// the conversation title) gets a short title. A message containing "hold this
+// turn" gets no answer for a minute, so a client can cancel the turn while it
+// runs.
 //
 // Usage: node mock-ollama.mjs <port>
 
@@ -11,19 +13,65 @@ import { createServer } from "node:http";
 
 const port = Number(process.argv[2] ?? 18788);
 const FORECAST_TOOL = "mcp__demo__get-forecast";
+const SURFACE_TOOL = "render-surface";
 const HOLD = /hold this turn/i;
+const SURFACE = /events surface/i;
 const HOLD_MS = 60_000;
+
+// A real surface draft: a title, a line of text, and a Button whose `openUrl`
+// points outside the org's (empty) link allowlist, so the client asks first.
+const SURFACE_DRAFT = {
+  title: "Weekend in Berlin",
+  fallback_text:
+    "Three events in Berlin this weekend. Open https://example.org/berlin/events for details.",
+  components: [
+    { id: "root", component: "Column", children: ["title", "blurb", "cta"] },
+    { id: "title", component: "Text", text: "Events in Berlin" },
+    {
+      id: "blurb",
+      component: "Text",
+      text: "Three picks for this weekend, starting with a concert at silent green.",
+    },
+    {
+      id: "cta",
+      component: "Button",
+      child: "cta_label",
+      variant: "primary",
+      action: {
+        functionCall: {
+          "@call": "openUrl",
+          args: { url: "https://example.org/berlin/events" },
+        },
+      },
+    },
+    { id: "cta_label", component: "Text", text: "Open details" },
+  ],
+  data_model: {},
+};
 
 function reply(body) {
   const messages = body.messages ?? [];
   const last = messages[messages.length - 1] ?? {};
-  const offersForecast = (body.tools ?? []).some(
-    (tool) => tool.function?.name === FORECAST_TOOL,
-  );
+  const tools = (body.tools ?? []).map((tool) => tool.function?.name);
+  if (last.role === "tool" && last.name === SURFACE_TOOL) {
+    return {
+      role: "assistant",
+      content: "Here are the events for this weekend.",
+    };
+  }
   if (last.role === "tool") {
     return { role: "assistant", content: "It is sunny and 21°C in Berlin." };
   }
-  if (offersForecast && /weather/i.test(last.content ?? "")) {
+  if (tools.includes(SURFACE_TOOL) && SURFACE.test(last.content ?? "")) {
+    return {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        { function: { name: SURFACE_TOOL, arguments: SURFACE_DRAFT } },
+      ],
+    };
+  }
+  if (tools.includes(FORECAST_TOOL) && /weather/i.test(last.content ?? "")) {
     return {
       role: "assistant",
       content: "",
@@ -31,6 +79,9 @@ function reply(body) {
         { function: { name: FORECAST_TOOL, arguments: { city: "Berlin" } } },
       ],
     };
+  }
+  if (/thanks/i.test(last.content ?? "")) {
+    return { role: "assistant", content: "You're welcome." };
   }
   return { role: "assistant", content: "Weather in Berlin" };
 }

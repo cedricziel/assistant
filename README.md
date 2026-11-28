@@ -483,6 +483,7 @@ See `crates/interface-signal/README.md` for setup and device linking details.
 | [Moonshot provider](docs/moonshot.md)          | Kimi K2/K2.5 models, regional endpoints               |
 | [Web UI](docs/web-ui.md)                       | Flutter web host, REST API, and A2A protocol server   |
 | [Approvals and questions](docs/chat/approvals-and-questions.md) | Chat cards, saved rules, and timeouts |
+| [Generative UI](docs/chat/generative-ui.md) | Surfaces in web chat, links, images, and fallbacks |
 | [Tool result views](docs/tool-result-views.md) | Render contracts, tool status, and chat result views   |
 | [Authentication](docs/authentication.md)       | Web UI token auth, cookie flow, and A2A security      |
 | [Message bus](docs/messaging.md)               | Durable topic-based message bus architecture          |

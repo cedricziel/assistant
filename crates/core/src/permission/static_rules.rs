@@ -371,6 +371,8 @@ fn builtin_allow() -> Vec<Rule> {
         ("load-skill", None),
         ("list-tasks", None),
         ("plan-update", None),
+        // Rendering a validated surface is presentation, not an action.
+        ("render-surface", None),
         // Asking a question is not an action; the user answers it.
         ("ask-user", None),
         ("schedule-task", None),
@@ -608,6 +610,7 @@ mod tests {
             "load-skill",
             "list-tasks",
             "plan-update",
+            "render-surface",
             "agent-status",
             "ask-user",
         ] {
