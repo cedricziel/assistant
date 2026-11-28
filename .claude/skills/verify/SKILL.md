@@ -45,8 +45,10 @@ on the same `HOME` (log: `HOME/orchestrator.log`).
 
 `--mcp-demo` lists `examples/mcp-apps-demo` under `[mcp]` and points the org's
 LLM at the scripted model in `crates/web-ui/e2e/tests/support/mock-ollama.mjs`:
-any message containing "weather" calls `mcp__demo__get-forecast`. It also
-allows that tool in `[permissions]`, since web and MCP turns cannot prompt.
+any message containing "weather" calls `mcp__demo__get-forecast`, and one
+containing "events surface" calls `render-surface` with a link outside the
+allowlist. It also allows the forecast tool in `[permissions]`, since web and
+MCP turns cannot prompt.
 
 ## 3. Drive it
 
