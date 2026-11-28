@@ -8,6 +8,7 @@ import 'dart:convert';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_ui/models.dart' show ApprovalDecision;
+import 'package:built_value/json_object.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:fresh_dio/fresh_dio.dart';
@@ -687,6 +688,22 @@ RespondToInteractionRequest _respondRequest(InteractionAnswer answer) =>
                       ..text = a.text,
                   ),
               ]),
+          ),
+        ),
+        SurfaceActionAnswer(:final action) => _RespondOneOf(
+          typeIndex: 2,
+          value: RespondToInteractionRequestOneOf2(
+            (r) => r
+              ..kind = RespondToInteractionRequestOneOf2KindEnum.surfaceAction
+              ..action = JsonObject({
+                'name': action.name,
+                'surfaceId': action.surfaceId,
+                'sourceComponentId': action.sourceComponentId,
+                'context': action.context,
+              })
+              ..dataModel = action.dataModel == null
+                  ? null
+                  : JsonObject(action.dataModel!),
           ),
         ),
         DeclineAnswer() => _RespondOneOf(

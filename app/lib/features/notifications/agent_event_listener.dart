@@ -177,6 +177,10 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
         request.questions.firstOrNull?.prompt ??
             'Your assistant asked a question',
       ),
+      InteractionKind.surfaceAction => (
+        'Your input is needed',
+        'Open the chat to answer the form',
+      ),
       InteractionKind.unknown => (
         'Your assistant needs your input',
         'Open the chat to respond',

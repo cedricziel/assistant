@@ -66,8 +66,9 @@ void main() {
       expect(InteractionKind.fromWire('question'), InteractionKind.question);
       expect(
         InteractionKind.fromWire('surface_action'),
-        InteractionKind.unknown,
+        InteractionKind.surfaceAction,
       );
+      expect(InteractionKind.fromWire('nope'), InteractionKind.unknown);
     });
 
     test('ApprovalDecision round-trips its wire name', () {

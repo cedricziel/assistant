@@ -317,7 +317,7 @@ void main() {
     ) async {
       final f = await _start(tester);
       await f.emit(const StatusEvent('x', toolCallId: 'call-1'));
-      await f.emit(_approval(kind: 'surface_action', rendersCard: false));
+      await f.emit(_approval(kind: 'hologram', rendersCard: false));
 
       expect(f.toolInteraction?.kind, InteractionKind.unknown);
       expect(f.toolInteraction?.rendersCard, isFalse);

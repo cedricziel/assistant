@@ -3,6 +3,10 @@ enum InteractionKind {
   toolApproval('tool_approval'),
   question('question'),
 
+  /// The turn waits on an A2UI surface the user answers directly. The surface
+  /// is the card, so this kind renders none.
+  surfaceAction('surface_action'),
+
   /// A kind this build does not know. Never answered automatically.
   unknown('');
 

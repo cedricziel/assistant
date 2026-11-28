@@ -1,5 +1,7 @@
 import 'package:assistant_ui/models.dart' show ApprovalDecision, QuestionAnswer;
 
+import 'surface_action.dart';
+
 /// The owner's answer to a turn interaction, as the respond route takes it.
 ///
 /// One subtype per request `kind`. The server validates the answer against the
@@ -21,6 +23,14 @@ final class QuestionAnswers extends InteractionAnswer {
   const QuestionAnswers(this.answers);
 
   final List<QuestionAnswer> answers;
+}
+
+/// Answers a `surface_action` interaction: an action the surface's Button
+/// raised, plus the data model when the surface sends one.
+final class SurfaceActionAnswer extends InteractionAnswer {
+  const SurfaceActionAnswer(this.action);
+
+  final SurfaceActionSubmission action;
 }
 
 /// "I won't answer", accepted for any kind. An approval ends as `reject_once`.

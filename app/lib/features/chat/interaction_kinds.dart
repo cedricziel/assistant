@@ -53,6 +53,10 @@ final Map<InteractionKind, InteractionKindSpec> _kinds = {
       onDecline: () => onAnswer(const DeclineAnswer()),
     ),
   ),
+  InteractionKind.surfaceAction: const InteractionKindSpec(
+    progressLabel: 'Waiting for your input',
+    announcement: 'Your input is needed',
+  ),
 };
 
 const _unregistered = InteractionKindSpec(
