@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.4](https://github.com/cedricziel/assistant/compare/v0.3.3...v0.3.4) (2026-11-28)
+
+
+### Features
+
+* **tool-executor:** offer wait_for_action ([5f50605](https://github.com/cedricziel/assistant/commit/5f5060517b630ea18c2e54b4a9805dda044650f2))
+
+
+### Bug Fixes
+
+* **app:** cap surface entries at the message column width ([402f9a8](https://github.com/cedricziel/assistant/commit/402f9a825ecb202def507ba7d8a04532fbf28352))
+* **ci:** pin the Rust toolchain in the macOS release job ([e70d016](https://github.com/cedricziel/assistant/commit/e70d016cf729d412f533137da6fd3b201e112921))
+* **ci:** pin the Rust toolchain in the macOS release job ([808c581](https://github.com/cedricziel/assistant/commit/808c5819611d5bcfe4f01150dd3c100ae07533c8))
+
 ## [0.3.3](https://github.com/cedricziel/assistant/compare/v0.3.2...v0.3.3) (2026-11-28)
 
 
