@@ -55,6 +55,62 @@ ApprovalDecision? approvalDecisionFrom(Map<String, Object?>? response) {
   return decision is String ? ApprovalDecision.fromWire(decision) : null;
 }
 
+/// Whether a `question` response body says "I won't answer".
+bool declinedFrom(Map<String, Object?>? response) =>
+    response?['declined'] == true;
+
+/// The owner's answers in a `question` response body.
+List<QuestionAnswer> questionAnswersFrom(Map<String, Object?>? response) {
+  final raw = response?['answers'];
+  if (raw is! List) return const [];
+  return [
+    for (final item in raw)
+      if (item is Map)
+        QuestionAnswer(
+          questionId: item['question_id'] is String
+              ? item['question_id']! as String
+              : '',
+          selectedOptionIds: [
+            if (item['selected_option_ids'] is List)
+              for (final id in item['selected_option_ids']! as List)
+                if (id is String) id,
+          ],
+          text: item['text'] is String ? item['text'] as String : null,
+        ),
+  ];
+}
+
+/// The questions of a `question` request body, in request order.
+List<QuestionItem> _questionsFrom(Object? raw) {
+  if (raw is! List) return const [];
+  return [
+    for (final item in raw)
+      if (item is Map)
+        QuestionItem(
+          id: item['id'] is String ? item['id']! as String : '',
+          prompt: item['prompt'] is String ? item['prompt']! as String : '',
+          options: _optionsFrom(item['options']),
+          multiple: item['multiple'] == true,
+          freeText: item['free_text'] == true,
+        ),
+  ];
+}
+
+List<QuestionOption> _optionsFrom(Object? raw) {
+  if (raw is! List) return const [];
+  return [
+    for (final item in raw)
+      if (item is Map)
+        QuestionOption(
+          id: item['id'] is String ? item['id']! as String : '',
+          label: item['label'] is String ? item['label']! as String : '',
+          description: item['description'] is String
+              ? item['description']! as String
+              : null,
+        ),
+  ];
+}
+
 InteractionRecord _record({
   required String id,
   required String kind,
@@ -69,10 +125,12 @@ InteractionRecord _record({
   String? ruleId,
 }) {
   final arguments = request['arguments'];
-  // Approval fields exist only on `tool_approval`; a newer server may put any
-  // JSON type in a kind this build does not know, so cast nothing else.
+  // Kind-specific fields exist only on their own kind; a newer server may put
+  // any JSON type in a kind this build does not know, so cast nothing else.
   final isApproval = kind == InteractionKind.toolApproval.wire;
+  final isQuestion = kind == InteractionKind.question.wire;
   final options = isApproval ? request['options'] : null;
+  final resolved = status == InteractionStatus.resolved;
   return InteractionRecord(
     id: id,
     kind: InteractionKind.fromWire(kind),
@@ -91,10 +149,11 @@ InteractionRecord _record({
           if (o is String) ?ApprovalDecision.fromWire(o),
     ],
     suggestedRule: isApproval ? request['suggested_rule'] as String? : null,
-    decision: status == InteractionStatus.resolved
-        ? approvalDecisionFrom(response)
-        : null,
+    decision: resolved ? approvalDecisionFrom(response) : null,
     resolvedAt: resolvedAt,
     ruleId: ruleId,
+    questions: isQuestion ? _questionsFrom(request['questions']) : const [],
+    answers: isQuestion && resolved ? questionAnswersFrom(response) : const [],
+    declined: isQuestion && resolved && declinedFrom(response),
   );
 }

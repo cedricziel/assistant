@@ -12,15 +12,19 @@ use super::Orchestrator;
 impl Orchestrator {
     /// Compose the full system prompt from memory files, available skills,
     /// and interface-specific output capabilities.
-    pub(crate) async fn compose_system_prompt(&self, interface: &Interface) -> String {
+    pub(crate) async fn compose_system_prompt(
+        &self,
+        interface: &Interface,
+        rich_client: bool,
+    ) -> String {
         let mut prompt = self.memory_loader.load_system_prompt();
         if let Some(skills_xml) = self.available_skills_xml().await {
             prompt.push_str("\n\n");
             prompt.push_str(&skills_xml);
         }
-        let caps = output_capabilities(interface);
+        let caps = output_capabilities(interface, rich_client);
         prompt.push_str("\n\n");
-        prompt.push_str(caps);
+        prompt.push_str(&caps);
         prompt
     }
 
@@ -150,12 +154,16 @@ impl Orchestrator {
 
 // ── Module-level helpers ───────────────────────────────────────────────────────
 
-/// Return a static output-capabilities block tailored to the connected interface.
+/// Return an output-capabilities block tailored to the connected interface.
 ///
 /// This text is compiled into the binary — the model cannot edit or delete it.
 /// It tells the model what rich output formats the connected client can render.
-fn output_capabilities(interface: &Interface) -> &'static str {
-    match interface {
+///
+/// `rich_client` is true only for an interactive web turn (see
+/// [`Orchestrator::rich_client_turn`]); that is the only client to which
+/// `render-surface` is offered.
+fn output_capabilities(interface: &Interface, rich_client: bool) -> String {
+    let caps = match interface {
         Interface::Web => {
             "## Output capabilities\n\
              \n\
@@ -228,8 +236,26 @@ fn output_capabilities(interface: &Interface) -> &'static str {
              Your responses are consumed by another agent over the A2A protocol. Return \
              structured, well-formatted text. Do not use ```svg or ```mermaid."
         }
+    };
+
+    if rich_client && *interface == Interface::Web {
+        format!("{caps}{SURFACE_CAPABILITIES}")
+    } else {
+        caps.to_string()
     }
 }
+
+/// Appended to the web capabilities when the client can render A2UI surfaces.
+const SURFACE_CAPABILITIES: &str = "\n\
+     - Structured UI surfaces through the `render-surface` tool: cards, lists, forms and \
+     buttons the user can fill in and submit. Use one when the answer is a set of fields, \
+     options or records that reads better as a widget than as prose. Always give it a \
+     `fallback_text` that says in plain words what the surface shows, and update a surface \
+     you made earlier in the same turn with its `surface_id` instead of creating a second one. \
+     Pass `wait_for_action: true` when you cannot finish without the user: the turn then \
+     waits for them to submit or dismiss the surface, and carries on with what they entered. \
+     Leave it off when the surface only reports something, or when their answer can arrive as \
+     a later message.";
 
 fn skill_location_string(skill: &SpecSkillDef) -> Option<String> {
     let path = skill.dir.join("SKILL.md");
@@ -263,7 +289,7 @@ mod tests {
 
     #[test]
     fn web_mentions_svg_and_mermaid() {
-        let caps = output_capabilities(&Interface::Web);
+        let caps = output_capabilities(&Interface::Web, true);
         assert!(caps.contains("svg"), "Web capabilities should mention svg");
         assert!(
             caps.contains("mermaid"),
@@ -272,8 +298,74 @@ mod tests {
     }
 
     #[test]
+    fn interactive_web_advertises_render_surface() {
+        let caps = output_capabilities(&Interface::Web, true);
+        assert!(
+            caps.contains("render-surface"),
+            "an interactive Web turn can call render-surface"
+        );
+        assert!(
+            caps.contains("fallback_text"),
+            "the prompt says what to pass when a client cannot render the surface"
+        );
+    }
+
+    #[test]
+    fn interactive_web_explains_when_to_wait_for_action() {
+        let caps = output_capabilities(&Interface::Web, true);
+        assert!(
+            caps.contains("wait_for_action: true"),
+            "the prompt names the flag"
+        );
+        assert!(
+            caps.contains("waits for them to submit"),
+            "the prompt says the turn waits for an answer"
+        );
+        assert!(
+            caps.contains("Leave it off"),
+            "the prompt says when not to wait"
+        );
+    }
+
+    #[test]
+    fn non_interactive_web_does_not_mention_waiting() {
+        let caps = output_capabilities(&Interface::Web, false);
+        assert!(!caps.contains("wait_for_action"), "{caps}");
+    }
+
+    #[test]
+    fn non_interactive_web_does_not_advertise_render_surface() {
+        let caps = output_capabilities(&Interface::Web, false);
+        assert!(
+            !caps.contains("render-surface"),
+            "quick-message and voice turns cannot show a surface"
+        );
+    }
+
+    #[test]
+    fn other_interfaces_never_advertise_render_surface() {
+        let interfaces = [
+            Interface::Cli,
+            Interface::Signal,
+            Interface::Mcp,
+            Interface::Slack,
+            Interface::Mattermost,
+            Interface::Nextcloud,
+            Interface::Scheduler,
+            Interface::Matrix,
+            Interface::A2a,
+        ];
+        for iface in &interfaces {
+            assert!(
+                !output_capabilities(iface, true).contains("render-surface"),
+                "{iface:?} has no renderer and must not be offered render-surface"
+            );
+        }
+    }
+
+    #[test]
     fn signal_omits_svg_and_mermaid() {
-        let caps = output_capabilities(&Interface::Signal);
+        let caps = output_capabilities(&Interface::Signal, false);
         assert!(
             !caps.contains("svg"),
             "Signal capabilities should not mention svg"
@@ -286,7 +378,7 @@ mod tests {
 
     #[test]
     fn slack_mentions_mrkdwn() {
-        let caps = output_capabilities(&Interface::Slack);
+        let caps = output_capabilities(&Interface::Slack, false);
         assert!(
             caps.contains("mrkdwn"),
             "Slack capabilities should mention mrkdwn"
@@ -308,7 +400,7 @@ mod tests {
             Interface::A2a,
         ];
         for iface in &interfaces {
-            let caps = output_capabilities(iface);
+            let caps = output_capabilities(iface, true);
             assert!(
                 !caps.is_empty(),
                 "output_capabilities for {iface:?} should not be empty"

@@ -33,6 +33,15 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
     this.showResponseTiming = false,
     this.imageBaseUrl,
     this.imageAuthToken,
+    this.isPersisted = false,
+    this.turnWorking = false,
+    this.onEdit,
+    this.onRegenerate,
+    this.onRegenerateWith,
+    this.regenerateModels = const [],
+    this.onSwitchBranch,
+    this.onFeedbackChanged,
+    this.feedbackComment,
   });
 
   final ChatMessage message;
@@ -53,6 +62,28 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
   final String? imageBaseUrl;
   final String? imageAuthToken;
 
+  /// Whether the message is stored on the server, so it can branch.
+  final bool isPersisted;
+
+  /// Whether a turn works; hides Edit and Regenerate and disables the picker.
+  final bool turnWorking;
+  final VoidCallback? onEdit;
+  final VoidCallback? onRegenerate;
+
+  /// Receives the model picked from the "Regenerate with…" menu.
+  final ValueChanged<String>? onRegenerateWith;
+
+  /// The models the menu lists; fewer than two hides it.
+  final List<RegenerateModel> regenerateModels;
+  final ValueChanged<String>? onSwitchBranch;
+
+  /// Receives a tapped feedback rating, or `null` when the selected one is
+  /// tapped again. `null` leaves the thumbs off.
+  final ValueChanged<MessageRating?>? onFeedbackChanged;
+
+  /// The optional comment field shown below the actions after a vote.
+  final Widget? feedbackComment;
+
   @override
   Widget build(BuildContext context) {
     return MessageBubble(
@@ -68,16 +99,50 @@ class ChatMessageBubbleAdapter extends StatelessWidget {
               imageAuthToken: imageAuthToken,
             ),
       audio: _audio(context),
-      actions: buildMessageActions(
-        message: message,
-        capabilities: capabilities,
-        fetchMessageAudio: fetchMessageAudio,
-        onRetry: onRetry,
-        onStop: onStop,
-        isStopping: isStopping,
-        showResponseTiming: showResponseTiming,
-      ),
+      actions: _actions(context),
       contextMenuBuilder: _textSelectionContextMenuBuilder,
+    );
+  }
+
+  /// The action row and, after a vote, the optional comment field below it.
+  Widget _actions(BuildContext context) {
+    final actions = buildMessageActions(
+      message: message,
+      capabilities: capabilities,
+      fetchMessageAudio: fetchMessageAudio,
+      onRetry: onRetry,
+      onStop: onStop,
+      isStopping: isStopping,
+      showResponseTiming: showResponseTiming,
+      isPersisted: isPersisted,
+      turnWorking: turnWorking,
+      onEdit: onEdit,
+      onRegenerate: onRegenerate,
+      onRegenerateWith: onRegenerateWith,
+      regenerateModels: regenerateModels,
+      onSwitchBranch: onSwitchBranch,
+      trailing: buildMessageTrailing(
+        message: message,
+        rating: message.feedback?.rating,
+        onRatingChanged: onFeedbackChanged,
+      ),
+    );
+    final comment = feedbackComment;
+    if (comment == null) return actions;
+    return Column(
+      crossAxisAlignment: message.isUser
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        actions,
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: comment,
+          ),
+        ),
+      ],
     );
   }
 

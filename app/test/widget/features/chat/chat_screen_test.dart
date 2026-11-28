@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:assistant_app/shared/platform/adaptive_app.dart';
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
@@ -11,18 +10,25 @@ import 'package:assistant_app/api/models/server_profile.dart';
 import 'package:assistant_app/features/chat/audio_player_widget.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_screen.dart';
+import 'package:assistant_app/features/chat/models_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_app/features/personas/personas_provider.dart';
 import 'package:assistant_app/shared/platform/adaptive_text_field.dart';
 import 'package:assistant_ui/assistant_ui.dart'
     show
         ApprovalCard,
+        CodeBlock,
         CodeFileResultView,
+        FeedbackButtons,
+        MessageActionButton,
+        QuestionCard,
         TimelineEntryShell,
         TimelineEntryView,
         TurnProgressCard;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -83,6 +89,84 @@ class _FakeConversationListNotifier extends ConversationListNotifier {
   void prependConversation(ConversationSummary conv) {}
 }
 
+typedef _FeedbackCall = ({String messageId, String? rating, String? comment});
+
+/// Records feedback calls made by the chat notifier; with [fail] set every
+/// call fails as if the server had rejected it.
+class _FakeFeedbackConversationsApi extends ConversationsApi {
+  _FakeFeedbackConversationsApi() : super(Dio(), standardSerializers);
+
+  final List<_FeedbackCall> calls = [];
+  bool fail = false;
+
+  DioException _rejected() => DioException(
+    requestOptions: RequestOptions(path: '/feedback'),
+    type: DioExceptionType.badResponse,
+  );
+
+  @override
+  Future<Response<MessageFeedbackResponse>> setMessageFeedback({
+    required String id,
+    required String messageId,
+    required SetMessageFeedbackRequest setMessageFeedbackRequest,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    calls.add((
+      messageId: messageId,
+      rating: setMessageFeedbackRequest.rating.name,
+      comment: setMessageFeedbackRequest.comment,
+    ));
+    if (fail) throw _rejected();
+    return Response(
+      requestOptions: RequestOptions(path: '/feedback'),
+      statusCode: 200,
+      data: MessageFeedbackResponse(
+        (b) => b
+          ..messageId = messageId
+          ..rating = setMessageFeedbackRequest.rating
+          ..comment = setMessageFeedbackRequest.comment
+          ..createdAt = DateTime(2024)
+          ..updatedAt = DateTime(2024),
+      ),
+    );
+  }
+
+  @override
+  Future<Response<void>> deleteMessageFeedback({
+    required String id,
+    required String messageId,
+    String? xSpaceId,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? headers,
+    Map<String, dynamic>? extra,
+    ValidateStatus? validateStatus,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    calls.add((messageId: messageId, rating: null, comment: null));
+    if (fail) throw _rejected();
+    return Response(
+      requestOptions: RequestOptions(path: '/feedback'),
+      statusCode: 204,
+    );
+  }
+}
+
+class _FakeFeedbackApiClient extends ApiClient {
+  _FakeFeedbackApiClient() : super(baseUrl: 'http://fake', token: 'test');
+
+  final _FakeFeedbackConversationsApi fake = _FakeFeedbackConversationsApi();
+
+  @override
+  ConversationsApi get conversations => fake;
+}
+
 // ---------------------------------------------------------------------------
 // Widget builder — wraps ChatScreen in MaterialApp with provider fakes.
 
@@ -90,6 +174,7 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
   WidgetTester tester, {
   ServerCapabilities? capabilities,
   ValueNotifier<String?>? conversationId,
+  ApiClient? apiClient,
 }) async {
   final chatNotifier = _FakeChatNotifier();
 
@@ -103,6 +188,7 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
     ProviderScope(
       overrides: [
         chatProvider.overrideWith(() => chatNotifier),
+        modelsProvider.overrideWith((ref) async => const []),
         personasProvider.overrideWith(() => _FakePersonasNotifier()),
         conversationListProvider.overrideWith(
           () => _FakeConversationListNotifier(),
@@ -117,6 +203,7 @@ Future<({_FakeChatNotifier notifier})> pumpChatScreen(
           ),
           capabilitiesProvider.overrideWith((ref) async => capabilities),
         ],
+        if (apiClient != null) apiClientProvider.overrideWithValue(apiClient),
       ],
       child: MaterialApp(
         home: ValueListenableBuilder<String?>(
@@ -1057,6 +1144,86 @@ void main() {
       );
     });
 
+    testWidgets('a pending question shows its card, the answer label and '
+        'submits the answers through respond()', (tester) async {
+      final res = await pumpChatScreen(tester);
+      final now = DateTime.now();
+      final call =
+          ToolCallRecord(
+              toolName: 'ask-user',
+              status: ToolCallStatus.pending,
+              toolCallId: 'call-q',
+            )
+            ..interaction = InteractionRecord(
+              id: 'int-q',
+              kind: InteractionKind.question,
+              status: InteractionStatus.pending,
+              createdAt: now,
+              expiresAt: now.add(const Duration(minutes: 10)),
+              toolCallId: 'call-q',
+              questions: const [
+                QuestionItem(
+                  id: 'q1',
+                  prompt: 'Which branch?',
+                  options: [
+                    QuestionOption(id: 'o1', label: 'main'),
+                    QuestionOption(id: 'o2', label: 'release'),
+                  ],
+                ),
+              ],
+            );
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          isSending: true,
+          messages: [
+            ChatMessage(
+              id: 'toolcall-ask-user',
+              role: 'assistant',
+              content: '',
+              timelineType: TimelineEntryType.toolCall,
+              toolCalls: [call],
+            ),
+          ],
+          currentTurnStatus: TurnStatusSnapshot(
+            runId: 'run-1',
+            lastEventKind: TurnEventKind.status,
+            lastEventAt: DateTime.now().subtract(const Duration(minutes: 5)),
+            awaitingLabel: 'Waiting for your answer',
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(QuestionCard), findsOneWidget);
+      expect(
+        tester
+            .widget<TimelineEntryShell>(find.byType(TimelineEntryShell))
+            .entryState,
+        EntryState.awaitingInput,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(TurnProgressCard),
+          matching: find.text('Waiting for your answer'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('release'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('question_submit')));
+      await tester.pump();
+
+      expect(res.notifier.responses, hasLength(1));
+      expect(res.notifier.responses.single.$1, 'int-q');
+      final answers =
+          (res.notifier.responses.single.$2 as QuestionAnswers).answers;
+      expect(answers.single.questionId, 'q1');
+      expect(answers.single.selectedOptionIds, ['o2']);
+      expect(answers.single.text, isNull);
+    });
+
     testWidgets('the error banner shows the error and dismiss calls through', (
       tester,
     ) async {
@@ -1628,6 +1795,208 @@ void main() {
         findsNothing,
         reason: 'Dots must disappear once content starts streaming',
       );
+    });
+  });
+
+  group('Chat screen — message feedback', () {
+    ChatMessage reply(String id, {MessageFeedback? feedback}) =>
+        ChatMessage(id: id, role: 'assistant', content: 'Answer $id')
+          ..feedback = feedback;
+
+    MessageActionButton button(WidgetTester tester, String key) =>
+        tester.widget<MessageActionButton>(find.byKey(Key(key)));
+
+    Future<_FakeChatNotifier> pumpSeeded(
+      WidgetTester tester,
+      _FakeFeedbackApiClient api, {
+      List<ChatMessage>? messages,
+    }) async {
+      final result = await pumpChatScreen(tester, apiClient: api);
+      result.notifier.push(
+        ChatState(
+          conversationId: 'conv-1',
+          messages:
+              messages ??
+              [
+                reply(
+                  'm1',
+                  feedback: const MessageFeedback(
+                    rating: MessageRating.positive,
+                  ),
+                ),
+              ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      return result.notifier;
+    }
+
+    testWidgets('a history vote is selected and negative reopens the field', (
+      tester,
+    ) async {
+      final api = _FakeFeedbackApiClient();
+      await pumpSeeded(tester, api);
+
+      expect(
+        find.byType(FeedbackButtons),
+        findsOneWidget,
+        reason: 'persisted assistant replies carry thumbs',
+      );
+      expect(button(tester, 'feedback_positive_action').selected, isTrue);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('feedback_comment_input')), findsOneWidget);
+      expect(button(tester, 'feedback_negative_action').selected, isTrue);
+      expect(api.fake.calls.last.rating, 'negative');
+      expect(api.fake.calls.last.comment, isNull);
+    });
+
+    testWidgets('submitting a comment sends it and closes the field', (
+      tester,
+    ) async {
+      final api = _FakeFeedbackApiClient();
+      await pumpSeeded(tester, api);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('feedback_comment_input')),
+        ' wrong file ',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('feedback_comment_send')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('feedback_comment_input')), findsNothing);
+      expect(api.fake.calls.last.rating, 'negative');
+      expect(api.fake.calls.last.comment, 'wrong file');
+    });
+
+    testWidgets('dismissing the field keeps the vote', (tester) async {
+      final api = _FakeFeedbackApiClient();
+      await pumpSeeded(tester, api);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('feedback_comment_dismiss')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('feedback_comment_input')), findsNothing);
+      expect(button(tester, 'feedback_negative_action').selected, isTrue);
+    });
+
+    testWidgets('a second message opens its own field', (tester) async {
+      final api = _FakeFeedbackApiClient();
+      await pumpSeeded(tester, api, messages: [reply('m1'), reply('m2')]);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')).first);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('feedback_comment_input')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')).at(1));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('feedback_comment_input')), findsNWidgets(2));
+    });
+
+    testWidgets('a server error shows a snackbar and restores the vote', (
+      tester,
+    ) async {
+      final api = _FakeFeedbackApiClient()..fake.fail = true;
+      await pumpSeeded(tester, api);
+
+      await tester.tap(find.byKey(const Key('feedback_negative_action')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(SnackBar), findsOneWidget);
+      expect(
+        find.text('Could not save your feedback. Please try again.'),
+        findsOneWidget,
+      );
+      expect(button(tester, 'feedback_positive_action').selected, isTrue);
+      expect(button(tester, 'feedback_negative_action').selected, isFalse);
+
+      // Let the snackbar's auto-dismiss timer run before teardown.
+      await tester.pump(const Duration(seconds: 5));
+    });
+  });
+
+  group('Chat screen — code copy', () {
+    testWidgets('copying a fence writes the clipboard and announces', (
+      tester,
+    ) async {
+      final clipboard = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboard.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+
+      final announced = <String>[];
+      tester.binding.defaultBinaryMessenger
+          .setMockDecodedMessageHandler<Object?>(SystemChannels.accessibility, (
+            message,
+          ) async {
+            final map = message! as Map<Object?, Object?>;
+            if (map['type'] == 'announce') {
+              announced.add((map['data']! as Map)['message']! as String);
+            }
+            return null;
+          });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger
+            .setMockDecodedMessageHandler<Object?>(
+              SystemChannels.accessibility,
+              null,
+            ),
+      );
+
+      final res = await pumpChatScreen(tester);
+      res.notifier.push(
+        ChatState(
+          conversationId: 'c1',
+          messages: [
+            ChatMessage(
+              id: 'a1',
+              role: 'assistant',
+              content: 'Run this:\n\n```dart\nvoid main() {}\n```',
+            ),
+          ],
+        ),
+      );
+      await tester.pump();
+
+      final block = tester.widget<CodeBlock>(find.byType(CodeBlock));
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics && widget.properties.label == 'Copy code',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byType(CodeBlock),
+          matching: find.byType(InkWell),
+        ),
+      );
+      await tester.pump();
+
+      expect(clipboard, [block.code]);
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(announced, ['Code copied']);
     });
   });
 

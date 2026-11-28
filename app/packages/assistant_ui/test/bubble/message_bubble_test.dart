@@ -241,6 +241,37 @@ void main() {
       final text = tester.widget<SelectableText>(find.byType(SelectableText));
       expect(text.contextMenuBuilder, isNotNull);
     });
+
+    testWidgets('a form-submitted message shows the via form marker', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        MessageBubble(
+          senderLabel: 'You',
+          message: ChatMessage(
+            id: 'u',
+            role: 'user',
+            content: 'Submitted “Trip”',
+            viaForm: true,
+          ),
+        ),
+      );
+
+      expect(find.text('Submitted via form'), findsOneWidget);
+      expect(find.text('Submitted “Trip”'), findsOneWidget);
+    });
+
+    testWidgets('an ordinary user message has no via form marker', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        MessageBubble(senderLabel: 'You', message: _user('Hello')),
+      );
+
+      expect(find.text('Submitted via form'), findsNothing);
+    });
   });
 
   group('MessageBubble assistant slots', () {

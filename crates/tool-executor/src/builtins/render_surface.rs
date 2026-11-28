@@ -5,9 +5,6 @@
 //! org's URL policy and hands the validated surface back in `ToolOutput.data`.
 //! The runtime's surface hook (not this handler) assigns the surface id,
 //! persists it, merges updates and emits the event.
-//!
-//! Registered nowhere yet: `register_builtins` adds it once the clients that
-//! render surfaces have shipped.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -219,6 +216,11 @@ impl ToolHandler for RenderSurfaceHandler {
                 "send_data_model": {
                     "type": "boolean",
                     "description": "Include the data model when the user answers (default true)."
+                },
+                "wait_for_action": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Create mode: hold the turn until the user submits or dismisses the surface (default false). Only set it when you need their answer to continue."
                 },
                 "data_updates": {
                     "type": "array",
@@ -632,9 +634,18 @@ mod tests {
             .expect("component enum");
         assert!(names.contains(&json!("Text")) && names.contains(&json!("Button")));
         assert!(!names.contains(&json!("Video")));
+    }
+
+    #[test]
+    fn params_schema_offers_wait_for_action() {
+        let schema = plain().params_schema();
+        let wait = &schema["properties"]["wait_for_action"];
+        assert_eq!(wait["type"], "boolean", "{schema}");
+        assert_eq!(wait["default"], false, "the turn does not wait by default");
+        let description = wait["description"].as_str().unwrap_or_default();
         assert!(
-            props.get("wait_for_action").is_none(),
-            "wait_for_action lands with PR 20"
+            description.to_lowercase().contains("create"),
+            "the description says the flag is for create mode: {description}"
         );
     }
 }

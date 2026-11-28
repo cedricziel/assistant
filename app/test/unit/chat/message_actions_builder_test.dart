@@ -51,14 +51,18 @@ Widget _wrap(
   ),
 );
 
-ChatMessage _user({List<ChatAttachment>? attachments, BranchInfo? branch}) =>
-    ChatMessage(
-      id: 'u',
-      role: 'user',
-      content: 'A question',
-      attachments: attachments,
-      branch: branch,
-    );
+ChatMessage _user({
+  List<ChatAttachment>? attachments,
+  BranchInfo? branch,
+  BranchInfo? replyBranch,
+}) => ChatMessage(
+  id: 'u',
+  role: 'user',
+  content: 'A question',
+  attachments: attachments,
+  branch: branch,
+  replyBranch: replyBranch,
+);
 
 const _branch = BranchInfo(count: 3, index: 1, siblingIds: ['m1', 'm2', 'm3']);
 
@@ -75,23 +79,30 @@ const _timing = MessageTiming(
 );
 
 ChatMessage _assistant({
+  String id = 'a',
   String content = 'A reply',
   BranchInfo? branch,
   MessageStatus status = MessageStatus.ok,
   bool isStreaming = false,
+  TimelineEntryType timelineType = TimelineEntryType.message,
   MessageTiming? timing,
+  String? model,
 }) => ChatMessage(
-  id: 'a',
+  id: id,
   role: 'assistant',
   content: content,
   status: status,
   isStreaming: isStreaming,
   branch: branch,
+  timelineType: timelineType,
   timing: timing,
+  model: model,
 );
 
 double _left(WidgetTester tester, String key) =>
     tester.getTopLeft(find.byKey(Key(key))).dx;
+
+void _ignoreRating(MessageRating? _) {}
 
 void main() {
   setUp(installFakeAudioplayers);
@@ -288,6 +299,87 @@ void main() {
     });
   });
 
+  group('buildMessageTrailing', () {
+    List<Widget> trailing(
+      ChatMessage message, {
+      Widget? timing,
+      ValueChanged<MessageRating?>? onRatingChanged = _ignoreRating,
+    }) => buildMessageTrailing(
+      message: message,
+      timing: timing,
+      rating: message.feedback?.rating,
+      onRatingChanged: onRatingChanged,
+    );
+
+    test('an assistant reply gets feedback buttons after any timing', () {
+      const timing = Text('timing', key: Key('timing'));
+      final widgets = trailing(_assistant(), timing: timing);
+
+      expect(widgets.first, same(timing));
+      expect(widgets.last, isA<FeedbackButtons>());
+      expect(widgets, hasLength(2));
+    });
+
+    test('the current rating reaches the buttons', () {
+      final message = _assistant()
+        ..feedback = const MessageFeedback(rating: MessageRating.positive);
+
+      final buttons = trailing(message).single as FeedbackButtons;
+
+      expect(buttons.rating, MessageRating.positive);
+      expect(buttons.enabled, isTrue);
+    });
+
+    test('taps are reported through onRatingChanged', () {
+      MessageRating? last;
+      final widgets = trailing(
+        _assistant(),
+        onRatingChanged: (rating) => last = rating,
+      );
+      final buttons = widgets.single as FeedbackButtons;
+
+      buttons.onChanged(MessageRating.negative);
+
+      expect(last, MessageRating.negative);
+    });
+
+    test('user messages get no buttons', () {
+      expect(trailing(_user()), isEmpty);
+    });
+
+    test('streaming replies get no buttons', () {
+      expect(trailing(_assistant(isStreaming: true)), isEmpty);
+    });
+
+    test('failed replies get no buttons', () {
+      expect(trailing(_assistant(status: MessageStatus.failed)), isEmpty);
+    });
+
+    test('empty or blank replies get no buttons', () {
+      expect(trailing(_assistant(content: '')), isEmpty);
+      expect(trailing(_assistant(content: '   ')), isEmpty);
+    });
+
+    test('non-message timeline entries get no buttons', () {
+      expect(
+        trailing(_assistant(timelineType: TimelineEntryType.thinking)),
+        isEmpty,
+      );
+      expect(
+        trailing(_assistant(timelineType: TimelineEntryType.toolCall)),
+        isEmpty,
+      );
+    });
+
+    test('the unsaved assistant- fallback id gets no buttons', () {
+      expect(trailing(_assistant(id: 'assistant-1759238400000')), isEmpty);
+    });
+
+    test('without a callback there is nothing to wire', () {
+      expect(trailing(_assistant(), onRatingChanged: null), isEmpty);
+    });
+  });
+
   group('buildMessageActions branch entries', () {
     final edit = find.byKey(const Key('edit_action'));
     final regenerate = find.byKey(const Key('regenerate_action'));
@@ -455,6 +547,50 @@ void main() {
       expect(find.byType(BranchPicker), findsNothing);
     });
 
+    testWidgets('a user message shows its reply branch when it has no reply', (
+      tester,
+    ) async {
+      final switched = <String>[];
+      await tester.pumpWidget(
+        _wrap(
+          _user(
+            replyBranch: const BranchInfo(
+              count: 2,
+              index: 1,
+              siblingIds: ['r1', 'r2'],
+            ),
+          ),
+          isPersisted: true,
+          onSwitchBranch: switched.add,
+        ),
+      );
+
+      final picker = tester.widget<BranchPicker>(find.byType(BranchPicker));
+      expect((picker.index, picker.count), (1, 2));
+      picker.onPrevious();
+      expect(switched, ['r1']);
+    });
+
+    testWidgets('the message branch wins over its reply branch', (
+      tester,
+    ) async {
+      const replyBranch = BranchInfo(
+        count: 2,
+        index: 0,
+        siblingIds: ['r1', 'r2'],
+      );
+      await tester.pumpWidget(
+        _wrap(
+          _user(branch: _branch, replyBranch: replyBranch),
+          isPersisted: true,
+          onSwitchBranch: (_) {},
+        ),
+      );
+
+      final picker = tester.widget<BranchPicker>(find.byType(BranchPicker));
+      expect((picker.index, picker.count), (1, 3));
+    });
+
     testWidgets('the regenerate menu needs the callback and two models', (
       tester,
     ) async {
@@ -504,6 +640,45 @@ void main() {
         ),
       );
       expect(find.byType(RegenerateMenuButton), findsNothing);
+    });
+
+    testWidgets('the picker tooltip names a version made by another model', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(branch: _branch, model: 'model-b'),
+          isPersisted: true,
+          regenerateModels: _models,
+          onSwitchBranch: (_) {},
+        ),
+      );
+
+      expect(find.byTooltip('model-b'), findsOneWidget);
+    });
+
+    testWidgets('no tooltip for the default model or an unrecorded one', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(branch: _branch, model: 'model-a'),
+          isPersisted: true,
+          regenerateModels: _models,
+          onSwitchBranch: (_) {},
+        ),
+      );
+      expect(find.byTooltip('model-a'), findsNothing);
+
+      await tester.pumpWidget(
+        _wrap(
+          _assistant(branch: _branch),
+          isPersisted: true,
+          regenerateModels: _models,
+          onSwitchBranch: (_) {},
+        ),
+      );
+      expect(find.byTooltip('model-b'), findsNothing);
     });
   });
 }

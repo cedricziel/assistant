@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +16,8 @@ import 'notification_service.dart';
 /// - Tool success → "Skill complete" notification
 /// - Tool failure → "Skill failed" notification
 /// - Chat error → "Assistant error" notification
+/// - Interaction requested → "Approval needed" / "Your assistant has a
+///   question" notification (when not `resumed`)
 ///
 /// All notifications respect the per-category [NotificationPreferences].
 /// Lifecycle state is tracked via [WidgetsBindingObserver] so notifications
@@ -96,6 +100,15 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
     final prefs = ref.read(notificationPreferencesProvider).value;
     if (prefs == null) return;
 
+    // Interaction requested: approval or question copy when backgrounded.
+    final request = nextState.lastInteractionRequest;
+    if (request != null &&
+        request != prevState.lastInteractionRequest &&
+        !_isResumed &&
+        prefs.notifyApprovalRequests) {
+      unawaited(_notifyInteraction(request, nextState.conversationId));
+    }
+
     // New assistant message: streaming finished and last message is assistant.
     if (prevState.isSending &&
         !nextState.isSending &&
@@ -143,5 +156,36 @@ class _AgentEventListenerState extends ConsumerState<AgentEventListener>
           : errMsg;
       ref.read(notificationServiceProvider).show('Assistant error', truncated);
     }
+  }
+
+  /// Notify about an interaction the turn now waits on, unless the browser's
+  /// delayed push already covers it.
+  Future<void> _notifyInteraction(
+    InteractionRecord request,
+    String? conversationId,
+  ) async {
+    final service = ref.read(notificationServiceProvider);
+    if (await service.hasActivePushSubscription()) return;
+
+    final (title, body) = switch (request.kind) {
+      InteractionKind.toolApproval => (
+        'Approval needed',
+        request.toolName ?? 'Your assistant needs approval',
+      ),
+      InteractionKind.question => (
+        'Your assistant has a question',
+        request.questions.firstOrNull?.prompt ??
+            'Your assistant asked a question',
+      ),
+      InteractionKind.surfaceAction => (
+        'Your input is needed',
+        'Open the chat to answer the form',
+      ),
+      InteractionKind.unknown => (
+        'Your assistant needs your input',
+        'Open the chat to respond',
+      ),
+    };
+    await service.show(title, body, conversationId: conversationId);
   }
 }

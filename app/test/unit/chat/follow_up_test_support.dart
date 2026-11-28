@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
+import 'package:assistant_app/api/models/surface_action.dart';
 import 'package:dio/dio.dart';
 
 /// One call to [FakeFollowUpApi.streamEventsFrom], with the controller a test
@@ -46,6 +47,7 @@ class FakeFollowUpApi extends ApiClient {
     String conversationId,
     String message, {
     List<String>? attachmentIds,
+    SurfaceActionSubmission? surfaceAction,
   }) => _posts.isEmpty ? const Stream.empty() : _posts.removeAt(0).stream;
 
   @override
@@ -68,6 +70,12 @@ class FakeFollowUpApi extends ApiClient {
 
   @override
   ConversationsApi get conversations => FakeConversationsApi();
+
+  @override
+  Future<List<InteractionDetail>> listConversationInteractions(
+    String conversationId, {
+    InteractionStatusView? status,
+  }) async => const [];
 }
 
 /// `getConversation` answers with one finished assistant message.

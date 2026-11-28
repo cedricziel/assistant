@@ -5,11 +5,14 @@ import 'dart:typed_data';
 import 'package:assistant_api/assistant_api.dart';
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
+import 'package:assistant_app/api/models/surface_action.dart';
 import 'package:assistant_app/features/chat/chat_announcer.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/chat/chat_stream_session.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:assistant_ui/assistant_ui.dart' show kTurnStallThreshold;
+import 'package:built_collection/built_collection.dart';
+import 'package:built_value/json_object.dart';
 import 'package:dio/dio.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -47,6 +50,7 @@ class _FakeApiClient extends ApiClient {
     String conversationId,
     String message, {
     List<String>? attachmentIds,
+    SurfaceActionSubmission? surfaceAction,
   }) {
     sentMessages.add(message);
     if (_queue.isNotEmpty) {
@@ -93,6 +97,10 @@ class _FakeApiClient extends ApiClient {
     );
   }
 
+  /// Texts passed to [streamEventsFrom], in call order.
+  final List<({String conversationId, String runId, int since})> replayCalls =
+      [];
+
   @override
   Stream<StreamEvent> streamEventsFrom(
     String conversationId,
@@ -101,6 +109,11 @@ class _FakeApiClient extends ApiClient {
     CancelToken? cancelToken,
   }) async* {
     replayCallCount++;
+    replayCalls.add((
+      conversationId: conversationId,
+      runId: runId,
+      since: since,
+    ));
     if (_replayQueue.isNotEmpty) {
       final item = _replayQueue.removeAt(0);
       if (item is DioException) throw item;
@@ -152,6 +165,24 @@ class _FakeApiClient extends ApiClient {
 
   /// Gates and scripts the next `getConversation` reply.
   _FakeConversationsApi get conversationsFake => _conversationsApi;
+
+  /// Runs reported by the pending-interactions list.
+  List<InteractionDetail> pendingInteractions = [];
+
+  /// Every status filter the pending list was asked for.
+  final List<InteractionStatusView?> interactionStatusQueries = [];
+
+  int pendingListCalls = 0;
+
+  @override
+  Future<List<InteractionDetail>> listConversationInteractions(
+    String conversationId, {
+    InteractionStatusView? status,
+  }) async {
+    pendingListCalls++;
+    interactionStatusQueries.add(status);
+    return pendingInteractions;
+  }
 }
 
 class _FakeConversationsApi extends ConversationsApi {
@@ -160,6 +191,12 @@ class _FakeConversationsApi extends ConversationsApi {
   /// Messages the server reports, as `(id, role, content)`. While `null`
   /// (the default) the request fails, like an unreachable server.
   List<(String, String, String)>? serverMessages;
+
+  /// Interactions the conversation detail reports, resolved and pending.
+  List<InteractionDetail> serverInteractions = [];
+
+  /// When set, used verbatim instead of [serverMessages].
+  List<MessageSummary>? serverMessageSummaries;
 
   /// `finish_reason` per message id; ids not listed have none.
   final Map<String, String> finishReasons = {};
@@ -183,12 +220,13 @@ class _FakeConversationsApi extends ConversationsApi {
     getConversationCalls++;
     await gate?.future;
     final messages = serverMessages;
-    if (messages == null) {
+    if (messages == null && serverMessageSummaries == null) {
       throw DioException(
         requestOptions: RequestOptions(path: '/api/conversations/$id'),
         type: DioExceptionType.connectionError,
       );
     }
+    final rows = messages ?? const <(String, String, String)>[];
     return Response(
       requestOptions: RequestOptions(path: '/api/conversations/$id'),
       statusCode: 200,
@@ -198,19 +236,23 @@ class _FakeConversationsApi extends ConversationsApi {
           ..title = 'T'
           ..createdAt = DateTime(2024, 1, 1)
           ..updatedAt = DateTime(2024, 1, 1)
-          ..messages.replace([
-            for (final (mid, role, content) in messages)
-              MessageSummary(
-                (m) => m
-                  ..id = mid
-                  ..role = role
-                  ..content = content
-                  ..createdAt = DateTime(2024, 1, 1)
-                  ..turn = 0
-                  ..ttsAvailable = false
-                  ..finishReason = finishReasons[mid],
-              ),
-          ]),
+          ..interactions.replace(serverInteractions)
+          ..messages.replace(
+            serverMessageSummaries ??
+                [
+                  for (final (mid, role, content) in rows)
+                    MessageSummary(
+                      (m) => m
+                        ..id = mid
+                        ..role = role
+                        ..content = content
+                        ..createdAt = DateTime(2024, 1, 1)
+                        ..turn = 0
+                        ..ttsAvailable = false
+                        ..finishReason = finishReasons[mid],
+                    ),
+                ],
+          ),
       ),
     );
   }
@@ -3663,6 +3705,127 @@ void main() {
         MessageStatus.stopped,
         MessageStatus.ok,
       ]);
+    });
+
+    testWidgets('finds a pending interaction and watches its run', (
+      tester,
+    ) async {
+      final fakeApi = _FakeApiClient();
+      final createdAt = DateTime.parse('2026-05-16T00:01:30Z');
+      fakeApi.conversationsFake.serverMessageSummaries = [
+        MessageSummary(
+          (b) => b
+            ..id = 'u1'
+            ..role = 'user'
+            ..content = 'go'
+            ..createdAt = DateTime.parse('2026-05-16T00:01:00Z')
+            ..turn = 1
+            ..ttsAvailable = false,
+        ),
+        MessageSummary(
+          (b) => b
+            ..id = 'a1'
+            ..role = 'assistant'
+            ..content = ''
+            ..createdAt = DateTime.parse('2026-05-16T00:01:10Z')
+            ..turn = 1
+            ..ttsAvailable = false
+            ..toolCalls = ListBuilder<ToolCallSummary>([
+              ToolCallSummary(
+                (t) => t
+                  ..name = 'ask-user'
+                  ..status = 'pending'
+                  ..toolCallId = 'call-q',
+              ),
+            ]),
+        ),
+      ];
+      fakeApi.pendingInteractions = [
+        InteractionDetail(
+          (b) => b
+            ..interactionId = 'int-q'
+            ..conversationId = 'conv-1'
+            ..runId = 'run-7'
+            ..kind = 'question'
+            ..status = InteractionStatusView.pending
+            ..rendersCard = true
+            ..toolCallId = 'call-q'
+            ..createdAt = createdAt
+            ..expiresAt = createdAt.add(const Duration(minutes: 10))
+            ..request = JsonObject({
+              'questions': [
+                {
+                  'id': 'q1',
+                  'prompt': 'Which branch?',
+                  'options': [
+                    {'id': 'o1', 'label': 'main'},
+                  ],
+                  'multiple': false,
+                  'free_text': false,
+                },
+              ],
+            }),
+        ),
+      ];
+      fakeApi.conversationsFake.serverInteractions =
+          fakeApi.pendingInteractions;
+      final replay = fakeApi.enqueueReplayStream();
+      final notifier = await _pumpTestApp(tester, fakeApi);
+
+      await notifier.loadConversation('conv-1');
+      await tester.pump();
+
+      expect(fakeApi.pendingListCalls, 1);
+      expect(
+        fakeApi.interactionStatusQueries.single,
+        InteractionStatusView.pending,
+      );
+      final entry = notifier.state.value!.messages.firstWhere(
+        (m) => m.timelineType == TimelineEntryType.toolCall,
+      );
+      final record = entry.toolCalls.single.interaction!;
+      expect(record.id, 'int-q');
+      expect(record.kind, InteractionKind.question);
+      expect(record.status, InteractionStatus.pending);
+      expect(
+        notifier.state.value!.currentTurnStatus?.awaitingLabel,
+        'Waiting for your answer',
+      );
+      expect(notifier.state.value!.currentTurnStatus?.runId, 'run-7');
+      expect(fakeApi.replayCalls.single.runId, 'run-7');
+      expect(fakeApi.replayCalls.single.since, 0);
+
+      await tester.runAsync(() async {
+        replay.add(
+          InteractionResolvedEvent(
+            interactionId: 'int-q',
+            kind: 'question',
+            outcome: InteractionOutcome.resolved,
+            resolvedAt: createdAt.add(const Duration(seconds: 20)),
+            response: const {
+              'answers': [
+                {
+                  'question_id': 'q1',
+                  'selected_option_ids': ['o1'],
+                },
+              ],
+            },
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+      });
+      await tester.pump();
+
+      expect(
+        entry.toolCalls.single.interaction?.status,
+        InteractionStatus.resolved,
+      );
+      expect(
+        entry.toolCalls.single.interaction?.answers.single.selectedOptionIds,
+        ['o1'],
+      );
+      unawaited(replay.close());
     });
   });
 

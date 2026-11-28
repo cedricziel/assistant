@@ -133,6 +133,7 @@ class MessageBubble extends StatelessWidget {
 
   List<Widget> _userContent(ColorScheme colorScheme, bool isFailed) => [
     ?attachments,
+    if (message.viaForm) _viaFormMarker(colorScheme),
     if (audio != null)
       audio!
     // Hide the text row when the content is blank and attachments provide the
@@ -160,6 +161,30 @@ class MessageBubble extends StatelessWidget {
         ],
       ),
   ];
+
+  /// "Submitted via form" marks a message the server built for a surface
+  /// action, so the words in the bubble are not the user's own.
+  Widget _viaFormMarker(ColorScheme colorScheme) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.dynamic_form_outlined,
+          size: 14,
+          color: colorScheme.onPrimary.withValues(alpha: 0.8),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          'Submitted via form',
+          style: TextStyle(
+            fontSize: 11,
+            color: colorScheme.onPrimary.withValues(alpha: 0.8),
+          ),
+        ),
+      ],
+    ),
+  );
 
   List<Widget> _assistantContent() => [
     // Animated dots while waiting for the first token.

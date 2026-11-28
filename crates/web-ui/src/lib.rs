@@ -150,6 +150,20 @@ async fn shared_nats_bus(
     }
 }
 
+/// This process's space runtimes. The web-ui process runs no turns in the
+/// packaged install, but its respond route and replay lookups need each
+/// space's interaction store and the in-process fast path, so interactions
+/// are on here too (ADR-0017, D2, D9).
+fn web_runtimes(
+    pool_factory: Arc<assistant_storage::OrgPoolFactory>,
+    orgs: Arc<OrgContexts>,
+    audio_store: Arc<audio_store::AudioStore>,
+) -> SpaceRuntimes {
+    SpaceRuntimes::new(pool_factory, orgs, None)
+        .with_interactions()
+        .with_audio_store(audio_store)
+}
+
 async fn run_with_args(args: Args) -> Result<()> {
     // -- OpenAPI spec dump (no server required) -------------------------------
     if args.print_openapi {
@@ -325,8 +339,7 @@ async fn run_with_args(args: Args) -> Result<()> {
 
     let mut mcp_app_servers: Vec<Arc<dyn assistant_core::mcp_app::McpAppServers>> =
         vec![integration_tools.clone()];
-    let mut runtimes = SpaceRuntimes::new(pool_factory.clone(), orgs.clone(), None)
-        .with_audio_store(audio_store.clone())
+    let mut runtimes = web_runtimes(pool_factory.clone(), orgs.clone(), audio_store.clone())
         .with_turn_tool_source(integration_tools);
     if let Some(bus) = shared_nats_bus(&server_config).await? {
         runtimes = runtimes.with_shared_bus(bus);
@@ -1116,5 +1129,41 @@ mod args_tests {
         let err = Args::try_parse_from(["webui", "--db-path", "/tmp/x.db"])
             .expect_err("--db-path was removed");
         assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use std::sync::Arc;
+
+    use assistant_core::types::agent::OrgConfig;
+    use assistant_llm_provider::scripted::ScriptedLlmProvider;
+    use assistant_runtime::OrgContexts;
+    use assistant_storage::{DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG, OrgPoolFactory};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn the_webui_process_builds_an_interaction_broker_in_every_space() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = OrgConfig::default();
+        config.memory.enabled = false;
+        let runtimes = web_runtimes(
+            Arc::new(OrgPoolFactory::new(root.path())),
+            Arc::new(OrgContexts::fixed(
+                config,
+                Arc::new(ScriptedLlmProvider::new()),
+            )),
+            Arc::new(audio_store::AudioStore::new()),
+        );
+
+        let runtime = runtimes
+            .get(DEFAULT_ORG_SLUG, DEFAULT_SPACE_SLUG)
+            .await
+            .unwrap();
+        assert!(
+            runtime.interactions.is_some(),
+            "the respond route needs a broker over the space's own store"
+        );
     }
 }

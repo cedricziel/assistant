@@ -414,10 +414,9 @@ pub(crate) fn start_turn(
 }
 
 /// Whether web turns can answer prompts (tool approvals, questions).
-/// `tool-approval-prompts`' enabling PR flips it, once the client cards
-/// exist. Send, edit and regenerate all read it through
-/// [`RunOptions::web_turn`], so they flip together.
-const WEB_TURNS_INTERACTIVE: bool = false;
+/// Send, edit and regenerate all read it through [`RunOptions::web_turn`], so
+/// they share one policy; voice turns opt out explicitly.
+const WEB_TURNS_INTERACTIVE: bool = true;
 
 /// Per-entry-point policy for [`stream_turn_to_sse`].
 #[derive(Debug, Clone)]
@@ -483,17 +482,18 @@ impl RunOptions {
         self
     }
 
-    /// A voice turn: it answers what the user said, offers no suggestions and
-    /// opens with that transcript.
+    /// A voice turn: it answers what the user said, offers no suggestions,
+    /// opens with that transcript and cannot prompt (nobody is reading).
     pub(crate) fn voice_turn(transcript: String) -> Self {
         Self {
             suggestions: false,
             transcript: Some(transcript),
+            interactive: false,
             ..Self::web_turn(TurnAnchor::Append)
         }
     }
 
-    /// Tests use it to flip the flag the enabling PR will flip.
+    /// Tests use it to choose a policy other than [`Self::web_turn`]'s.
     #[cfg(test)]
     pub(crate) const fn with_interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
@@ -2339,12 +2339,15 @@ mod tests {
     }
 
     #[test]
-    fn web_turns_are_not_interactive_until_the_approvals_pr_enables_them() {
+    fn streaming_chat_turns_ask_their_owner_and_voice_turns_do_not() {
         for anchor in web_anchors() {
             let opts = RunOptions::web_turn(anchor);
-            assert!(!opts.interactive, "{:?}", opts.anchor);
-            assert!(!submitted(&opts).interactive, "{:?}", opts.anchor);
+            assert!(opts.interactive, "{:?}", opts.anchor);
+            assert!(submitted(&opts).interactive, "{:?}", opts.anchor);
         }
+        let voice = RunOptions::voice_turn("hello".into());
+        assert!(!voice.interactive);
+        assert!(!submitted(&voice).interactive);
     }
 
     #[test]

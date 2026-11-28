@@ -1,4 +1,4 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page, Route } from "@playwright/test";
 
 import { enableAccessibility } from "./support/flutter";
 import { mockEverything } from "./support/integration-mocks";
@@ -164,14 +164,104 @@ const CATALOG_FIXTURE = [
   },
 ];
 
+const SETTINGS_ME = "user-1";
+
 /**
- * Stub `GET /api/tool-permission-rules` so the settings screenshot shows saved
- * tool approvals without depending on rules stored in the test server.
+ * Mock a space admin opening the settings screen: identity, org, spaces,
+ * membership, the org's users (for owner labels) and the two rule scopes.
+ *
+ * The `scope=space` response adds two members' rules, so the screenshot shows
+ * the "Members' approvals" group with a known member name and a bare user id.
  */
-async function mockToolPermissionRules(page: Page, rules: unknown[]) {
-  await page.route(/\/api\/tool-permission-rules(\?.*)?$/, (route) =>
-    route.fulfill({ json: rules }),
+async function mockSettingsAdmin(page: Page) {
+  const selection = {
+    orgId: "org-1",
+    orgName: "Acme",
+    spaceId: "eng",
+    spaceName: "Engineering",
+  };
+  // The persistent context runs login before this test body, so seed the
+  // selection now; the next full navigation reloads the app with it.
+  await page.evaluate(
+    (value) =>
+      window.localStorage.setItem(
+        "assistant.spaceSelection",
+        JSON.stringify(value),
+      ),
+    selection,
   );
+  await page.addInitScript((value) => {
+    window.localStorage.setItem(
+      "assistant.spaceSelection",
+      JSON.stringify(value),
+    );
+  }, selection);
+
+  const json = (route: Route, body: unknown) => route.fulfill({ json: body });
+
+  await page.route(/\/api\/users\/me$/, (route) =>
+    json(route, {
+      id: SETTINGS_ME,
+      email: "ada@example.com",
+      name: "Ada",
+      org_id: "org-1",
+      created_at: "2026-01-01T09:00:00Z",
+      updated_at: "2026-01-01T09:00:00Z",
+    }),
+  );
+  await page.route(/\/api\/orgs$/, (route) =>
+    json(route, [
+      { id: "org-1", name: "Acme", slug: "acme", auth_mode: "password" },
+    ]),
+  );
+  await page.route(/\/api\/orgs\/org-1$/, (route) =>
+    json(route, {
+      id: "org-1",
+      name: "Acme",
+      slug: "acme",
+      auth_mode: "password",
+      created_at: "2026-01-01T09:00:00Z",
+      updated_at: "2026-01-01T09:00:00Z",
+    }),
+  );
+  await page.route(/\/api\/orgs\/org-1\/spaces$/, (route) =>
+    json(route, [{ id: "eng", name: "Engineering", slug: "eng" }]),
+  );
+  await page.route(/\/api\/orgs\/org-1\/spaces\/eng\/members$/, (route) =>
+    json(route, [
+      {
+        space_id: "eng",
+        user_id: SETTINGS_ME,
+        role: "space_admin",
+        created_at: "2026-01-01T09:00:00Z",
+      },
+    ]),
+  );
+  await page.route(/\/api\/orgs\/org-1\/users$/, (route) =>
+    json(route, [
+      {
+        id: SETTINGS_ME,
+        email: "ada@example.com",
+        name: "Ada",
+        created_at: "2026-01-01T09:00:00Z",
+      },
+      {
+        id: "user-2",
+        email: "grace@example.com",
+        name: "Grace",
+        created_at: "2026-01-01T09:00:00Z",
+      },
+    ]),
+  );
+  await page.route(/\/api\/tool-permission-rules(\?.*)?$/, (route) => {
+    const scope = new URL(route.request().url()).searchParams.get("scope");
+    return json(
+      route,
+      scope === "space"
+        ? TOOL_PERMISSION_RULES_SPACE_FIXTURE
+        : TOOL_PERMISSION_RULES_FIXTURE,
+    );
+  });
 }
 
 const TOOL_PERMISSION_RULES_FIXTURE = [
@@ -198,6 +288,27 @@ const TOOL_PERMISSION_RULES_FIXTURE = [
     rule: "bash(rm *)",
     tool_name: "bash",
     created_at: "2026-01-04T09:00:00Z",
+  },
+];
+
+/** The same rules plus two members', as returned for `scope=space`. */
+const TOOL_PERMISSION_RULES_SPACE_FIXTURE = [
+  ...TOOL_PERMISSION_RULES_FIXTURE,
+  {
+    id: "rule-4",
+    user_id: "user-2",
+    effect: "allow",
+    rule: "bash(npm test*)",
+    tool_name: "bash",
+    created_at: "2026-01-05T09:00:00Z",
+  },
+  {
+    id: "rule-5",
+    user_id: "user-3",
+    effect: "deny",
+    rule: "web-fetch(https://*.example.com/*)",
+    tool_name: "web-fetch",
+    created_at: "2026-01-06T09:00:00Z",
   },
 ];
 
@@ -524,6 +635,123 @@ test.describe("Authenticated pages", () => {
     });
   });
 
+  test("chat page with message branches and the inline editor", async ({
+    page,
+  }) => {
+    // A persisted timeline with sibling versions. The server's history is
+    // authoritative for branch metadata, so fixture the detail response: a
+    // user row with two edited versions, its reply with two versions, and a
+    // second question whose visible reply is a tool row, which leaves the
+    // reply versions on the user row as `reply_branch`.
+    const conversationId = "00000000-0000-4000-8000-0000000000c1";
+    const userId = "00000000-0000-4000-8000-0000000000c2";
+    const replyId = "00000000-0000-4000-8000-0000000000c3";
+    const questionId = "00000000-0000-4000-8000-0000000000c4";
+    const at = "2024-01-01T00:00:00Z";
+    await page.route(
+      new RegExp(`/api/conversations/${conversationId}$`),
+      (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        return route.fulfill({
+          json: {
+            id: conversationId,
+            title: "Plan my week",
+            created_at: at,
+            updated_at: at,
+            messages: [
+              {
+                id: userId,
+                role: "user",
+                content: "Plan my week",
+                turn: 0,
+                created_at: at,
+                tts_available: false,
+                parent_id: null,
+                branch: {
+                  index: 1,
+                  count: 2,
+                  sibling_ids: ["00000000-0000-4000-8000-0000000000c5", userId],
+                },
+                attachments: [
+                  {
+                    id: "00000000-0000-4000-8000-0000000000c6",
+                    filename: "notes.pdf",
+                    mime_type: "application/pdf",
+                    size_bytes: 2048,
+                    url: "/media/notes.pdf",
+                    created_at: at,
+                  },
+                ],
+              },
+              {
+                id: replyId,
+                role: "assistant",
+                content:
+                  "Here is a plan for the week: focus on the launch review on Tuesday, and keep Thursday free for deep work.",
+                turn: 1,
+                created_at: at,
+                tts_available: false,
+                parent_id: userId,
+                branch: {
+                  index: 0,
+                  count: 2,
+                  sibling_ids: [
+                    replyId,
+                    "00000000-0000-4000-8000-0000000000c7",
+                  ],
+                },
+              },
+              {
+                id: questionId,
+                role: "user",
+                content: "What about Friday?",
+                turn: 2,
+                created_at: at,
+                tts_available: false,
+                parent_id: replyId,
+                reply_branch: {
+                  index: 1,
+                  count: 2,
+                  sibling_ids: [
+                    "00000000-0000-4000-8000-0000000000c8",
+                    "00000000-0000-4000-8000-0000000000c9",
+                  ],
+                },
+              },
+            ],
+            surfaces: [],
+            interactions: [],
+          },
+        });
+      },
+    );
+
+    await navigateAndSettle(page, `/chat/${conversationId}`);
+    await enableAccessibility(page);
+    // The action row appears below every bubble: Edit on the questions,
+    // Regenerate on the reply, a picker wherever versions exist.
+    await expect(
+      page.getByRole("button", { name: "Edit" }).first(),
+    ).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(CSS_SETTLE_MS);
+    await expect(page).toHaveScreenshot("chat-message-branches.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+
+    // Edit swaps the first bubble for the inline editor and keeps its
+    // attachment visible, read-only.
+    await page.getByRole("button", { name: "Edit" }).first().click();
+    await expect(
+      page.getByRole("textbox", { name: "Edit message" }),
+    ).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(CSS_SETTLE_MS);
+    await expect(page).toHaveScreenshot("chat-message-editor.png", {
+      fullPage: true,
+      maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,
+    });
+  });
+
   test("skills list page (empty state)", async ({ page }) => {
     await navigateAndSettle(page, "/skills");
     await expect(page).toHaveScreenshot("skills-empty.png", {
@@ -687,11 +915,31 @@ test.describe("Authenticated pages", () => {
   });
 
   test("settings screen", async ({ page }) => {
-    await mockToolPermissionRules(page, TOOL_PERMISSION_RULES_FIXTURE);
+    await mockSettingsAdmin(page);
     await navigateAndSettle(page, "/settings");
     // The section reloads once the space selection resolves, so a second
     // request reaches the mock. Wait for that as well before the screenshot.
     await page.waitForTimeout(1_500);
+    // The settings list scrolls inside the Flutter canvas, so bring the tool
+    // approvals (and the admin-only members group) into view. Desktop and
+    // tablet take wheel events; touch emulation ignores them, so also drive a
+    // synthesized touch scroll through CDP.
+    const viewport = page.viewportSize() ?? { width: 1280, height: 900 };
+    const scrollX = Math.round(viewport.width * 0.75);
+    const scrollY = Math.round(viewport.height * 0.6);
+    await page.mouse.move(scrollX, scrollY);
+    await page.mouse.wheel(0, 2_000);
+    await page.waitForTimeout(500);
+    const cdp = await page.context().newCDPSession(page);
+    for (let i = 0; i < 2; i++) {
+      await cdp.send("Input.synthesizeScrollGesture", {
+        x: scrollX,
+        y: scrollY,
+        yDistance: -2000,
+        speed: 2000,
+      });
+      await page.waitForTimeout(700);
+    }
     await expect(page).toHaveScreenshot("settings.png", {
       fullPage: true,
       maxDiffPixelRatio: MAX_DIFF_RATIO_FLUTTER,

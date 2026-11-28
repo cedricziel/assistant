@@ -1,7 +1,15 @@
-import 'package:assistant_api/assistant_api.dart' as api show BranchInfo;
 import 'package:assistant_api/assistant_api.dart'
-    hide BranchInfo, ServerCapabilities;
+    as api
+    show BranchInfo, InteractionDetail, SurfaceSummary;
+import 'package:assistant_api/assistant_api.dart'
+    hide BranchInfo, InteractionDetail, ServerCapabilities;
 import 'package:assistant_ui/models.dart';
+
+import 'interaction_mapping.dart';
+
+/// The tool that builds surfaces. Its successful result shows as the surface,
+/// not as a chip; a failed one keeps an ordinary error chip.
+const renderSurfaceToolName = 'render-surface';
 
 /// Map a server tool-status string onto [ToolCallStatus]; unknown values
 /// are treated as [ToolCallStatus.ok].
@@ -69,12 +77,65 @@ MessageStatus parseFinishReason(String? reason) {
 ///
 /// Rows that carry user-visible content (or attachments) are always preserved
 /// as a [TimelineEntryType.message] entry, even if they also have tool calls.
-List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
+///
+/// [interactions] are the conversation's stored interactions. Resolved ones
+/// become receipts on the tool call they belong to; an interaction that names
+/// a tool call not on the active branch renders nowhere.
+///
+/// [surfaces] are the conversation's stored surfaces. A surface replaces the
+/// successful `render-surface` call it is anchored to: the call whose
+/// `tool_call_id` matches, or, when the provider gave no id, the call at
+/// `anchor_call_index` in the message `anchor_message_id`. Surfaces are never
+/// matched by turn order. The user message a surface names in
+/// `action_message_id` is marked as submitted through a form.
+List<ChatMessage> chatMessagesFromHistory(
+  Iterable<MessageSummary> source, {
+  Iterable<api.InteractionDetail> interactions = const [],
+  Iterable<api.SurfaceSummary> surfaces = const [],
+}) {
+  final surfacesByToolCallId = <String, api.SurfaceSummary>{};
+  final surfacesByAnchor = <String, api.SurfaceSummary>{};
+  for (final surface in surfaces) {
+    final id = surface.toolCallId;
+    if (id != null) {
+      surfacesByToolCallId[id] = surface;
+    } else {
+      surfacesByAnchor[_anchorKey(
+            surface.anchorMessageId,
+            surface.anchorCallIndex,
+          )] =
+          surface;
+    }
+  }
+  final placedSurfaces = <String>{};
+  final actionMessageIds = <String>{};
+
   final messages = <ChatMessage>[];
+  final spans = <int, _TurnSpan>{};
   for (final m in source) {
+    final span = spans.putIfAbsent(
+      m.turn,
+      () => _TurnSpan(m.turn, m.createdAt, messages.length),
+    );
+    if (m.createdAt.isBefore(span.first)) span.first = m.createdAt;
+    if (m.createdAt.isAfter(span.last)) span.last = m.createdAt;
+
     final toolCalls = m.toolCalls?.toList() ?? const [];
     for (var i = 0; i < toolCalls.length; i++) {
       final tc = toolCalls[i];
+      final status = parseToolStatus(tc.status);
+      if (tc.name == renderSurfaceToolName && status == ToolCallStatus.ok) {
+        // The surface is the visible result; a successful call is not a chip.
+        final surface = tc.toolCallId != null
+            ? surfacesByToolCallId[tc.toolCallId]
+            : surfacesByAnchor[_anchorKey(m.id, i)];
+        if (surface != null && placedSurfaces.add(surface.surfaceId)) {
+          final actionMessageId = surface.actionMessageId;
+          if (actionMessageId != null) actionMessageIds.add(actionMessageId);
+          messages.add(_surfaceEntry(surface));
+        }
+        continue;
+      }
       messages.add(
         ChatMessage(
           // Include the index so multiple invocations of the same tool on a
@@ -86,7 +147,7 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
           toolCalls: [
             ToolCallRecord(
               toolName: tc.name,
-              status: parseToolStatus(tc.status),
+              status: status,
               arguments: tc.arguments?.asMap.cast<String, dynamic>(),
               result: tc.result,
               toolCallId: tc.toolCallId,
@@ -105,34 +166,211 @@ List<ChatMessage> chatMessagesFromHistory(Iterable<MessageSummary> source) {
         m.content.isEmpty &&
         toolCalls.isNotEmpty &&
         !hasAttachments;
-    if (isAssistantToolOnly) continue;
-
-    messages.add(
-      ChatMessage(
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        status: parseFinishReason(m.finishReason),
-        ttsAvailable: m.ttsAvailable,
-        parentId: m.parentId,
-        timing: _timingFromHistory(m.timing),
-        branch: _branchFromApi(m.branch),
-        replyBranch: _branchFromApi(m.replyBranch),
-        attachments: attachments
-            ?.map(
-              (a) => ChatAttachment(
-                id: a.id,
-                filename: a.filename,
-                mimeType: a.mimeType,
-                url: a.url,
-              ),
-            )
-            .toList(),
-      )..feedback = _feedbackFromHistory(m.feedback),
-    );
+    if (!isAssistantToolOnly) {
+      messages.add(
+        ChatMessage(
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          status: parseFinishReason(m.finishReason),
+          ttsAvailable: m.ttsAvailable,
+          parentId: m.parentId,
+          timing: _timingFromHistory(m.timing),
+          branch: _branchFromApi(m.branch),
+          replyBranch: _branchFromApi(m.replyBranch),
+          model: m.model,
+          attachments: attachments
+              ?.map(
+                (a) => ChatAttachment(
+                  id: a.id,
+                  filename: a.filename,
+                  mimeType: a.mimeType,
+                  url: a.url,
+                ),
+              )
+              .toList(),
+        )..feedback = _feedbackFromHistory(m.feedback),
+      );
+    }
+    span.end = messages.length;
   }
+  for (var i = 0; i < messages.length; i++) {
+    if (actionMessageIds.contains(messages[i].id)) {
+      messages[i] = messages[i].copyWith(viaForm: true);
+    }
+  }
+  _attachInteractions(messages, spans.values.toList(), interactions);
   return messages;
 }
+
+String _anchorKey(String messageId, int callIndex) => '$messageId#$callIndex';
+
+/// One surface timeline entry, positioned where its creating call was.
+ChatMessage _surfaceEntry(api.SurfaceSummary summary) => ChatMessage(
+  id: 'surface-${summary.surfaceId}',
+  role: 'assistant',
+  content: '',
+  timelineType: TimelineEntryType.surface,
+  surface: _surfaceFromSummary(summary),
+);
+
+SurfaceRecord _surfaceFromSummary(api.SurfaceSummary summary) {
+  final submittedModel = _submittedDataModel(summary.submittedAction?.value);
+  return SurfaceRecord(
+    surfaceId: summary.surfaceId,
+    toolCallId: summary.toolCallId,
+    anchorMessageId: summary.anchorMessageId,
+    anchorCallIndex: summary.anchorCallIndex,
+    title: summary.title,
+    fallbackText: summary.fallbackText,
+    status: SurfaceStatus.fromWire(summary.status),
+    answerable: summary.answerable,
+    messages: summary.messages
+        .map((message) => _jsonMap(message.value))
+        .whereType<Map<String, Object?>>()
+        .map(
+          (message) => submittedModel == null
+              ? message
+              : _withDataModel(message, submittedModel),
+        )
+        .toList(),
+    submittedAction: _jsonMap(summary.submittedAction?.value),
+  );
+}
+
+/// The data model the user submitted with the surface action, when the server
+/// stored one. A submitted surface shows these values, not the model it was
+/// created with.
+Map<String, Object?>? _submittedDataModel(Object? action) {
+  final model = _jsonMap(_jsonMap(action)?['data_model']);
+  return model == null || model.isEmpty ? null : model;
+}
+
+/// Replace the synthesized `createSurface`'s data model with [model].
+Map<String, Object?> _withDataModel(
+  Map<String, Object?> message,
+  Map<String, Object?> model,
+) {
+  final create = _jsonMap(message['createSurface']);
+  if (create == null) return message;
+  return {
+    ...message,
+    'createSurface': {...create, 'dataModel': model},
+  };
+}
+
+Map<String, Object?>? _jsonMap(Object? value) =>
+    value is Map ? value.cast<String, Object?>() : null;
+
+/// One persisted turn's index range in the rendered timeline.
+class _TurnSpan {
+  _TurnSpan(this.turn, this.first, this.start) : last = first, end = start;
+
+  final int turn;
+  DateTime first;
+  DateTime last;
+  final int start;
+  int end;
+}
+
+/// Attach [interactions] to the tool calls they belong to, or to the end of
+/// their turn when the request had no tool-call id.
+///
+/// An id that is not on the active branch is dropped: the receipt must not be
+/// parked on an unrelated turn. Without an id the same per-turn ordinal join
+/// as tool results applies (same tool name, in order), then the end of the
+/// turn.
+void _attachInteractions(
+  List<ChatMessage> messages,
+  List<_TurnSpan> spans,
+  Iterable<api.InteractionDetail> interactions,
+) {
+  if (interactions.isEmpty || spans.isEmpty) return;
+  final seen = <String>{};
+  final pending = <InteractionRecord>[];
+  for (final detail in interactions) {
+    if (!seen.add(detail.interactionId)) continue;
+    final record = interactionRecordFromDetail(detail);
+    final id = detail.toolCallId;
+    if (id != null) {
+      final call = _callById(messages, id);
+      if (call != null) {
+        call.interaction = record;
+      } else {
+        // The call is on a branch this history does not render.
+      }
+      continue;
+    }
+    pending.add(record);
+  }
+  if (pending.isEmpty) return;
+
+  final inserts = <int, List<ChatMessage>>{};
+  for (final record in pending) {
+    final span = _spanAt(spans, record.createdAt);
+    final hint = _toolNameHint(record);
+    final call = _freeCallIn(messages, span, hint);
+    if (call != null) {
+      call.interaction = record;
+      continue;
+    }
+    inserts.putIfAbsent(span.end, () => []).add(_interactionEntry(record));
+  }
+
+  final indexes = inserts.keys.toList()..sort((a, b) => b.compareTo(a));
+  for (final index in indexes) {
+    messages.insertAll(index, inserts[index]!);
+  }
+}
+
+ToolCallRecord? _callById(List<ChatMessage> messages, String id) {
+  for (final message in messages) {
+    for (final call in message.toolCalls) {
+      if (call.toolCallId == id) return call;
+    }
+  }
+  return null;
+}
+
+ToolCallRecord? _freeCallIn(
+  List<ChatMessage> messages,
+  _TurnSpan span,
+  String? toolName,
+) {
+  for (var i = span.start; i < span.end && i < messages.length; i++) {
+    final message = messages[i];
+    if (message.timelineType != TimelineEntryType.toolCall) continue;
+    for (final call in message.toolCalls) {
+      if (call.interaction != null) continue;
+      if (toolName == null || call.toolName == toolName) return call;
+    }
+  }
+  return null;
+}
+
+/// The tool an interaction belongs to when the request carries no tool-call id.
+String? _toolNameHint(InteractionRecord record) {
+  if (record.toolName != null) return record.toolName;
+  return record.kind == InteractionKind.question ? 'ask-user' : null;
+}
+
+_TurnSpan _spanAt(List<_TurnSpan> spans, DateTime at) {
+  for (final span in spans) {
+    if (!at.isBefore(span.first) && !at.isAfter(span.last)) return span;
+  }
+  _TurnSpan? prior;
+  for (final span in spans) {
+    if (!span.first.isAfter(at)) prior = span;
+  }
+  return prior ?? spans.first;
+}
+
+ChatMessage _interactionEntry(InteractionRecord record) => ChatMessage(
+  id: 'interaction-${record.id}',
+  role: 'assistant',
+  content: '',
+  timelineType: TimelineEntryType.interaction,
+)..interaction = record;
 
 BranchInfo? _branchFromApi(api.BranchInfo? info) => info == null
     ? null

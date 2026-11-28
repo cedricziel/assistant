@@ -21,6 +21,7 @@ ChatState abortedTurnState(
   if (failedUserMsgId != null) {
     setMessageStatus(msgs, failedUserMsgId, MessageStatus.failed);
   }
+  clearSurfaceInteractions(msgs);
   return from.copyWith(
     messages: msgs,
     isSending: false,
@@ -30,6 +31,31 @@ ChatState abortedTurnState(
     clearStatusMessage: clearStatusMessage,
     clearCurrentTurnStatus: clearTurnStatus,
   );
+}
+
+/// State after a post-turn surface action's request ended without a turn.
+///
+/// The optimistic `Submitted “<title>”` bubble and the streaming placeholder
+/// are removed: the server never streamed a reply, so neither is a real
+/// timeline row. The surface settles from [statusCode] (409 submitted, 410
+/// closed, anything else leaves it answerable) and [error] surfaces the
+/// failure, except for 409/410 where the surface state is the message.
+ChatState abortedSurfaceActionState(
+  ChatState from, {
+  required String surfaceId,
+  required String userMsgId,
+  required int? statusCode,
+  String? error,
+}) {
+  final next = abortedTurnState(
+    from,
+    clearStatusMessage: true,
+    clearTurnStatus: true,
+  );
+  final msgs = next.messages.where((m) => m.id != userMsgId).toList();
+  settleRejectedSurfaceAction(msgs, surfaceId, statusCode);
+  final known = statusCode == 409 || statusCode == 410;
+  return next.copyWith(messages: msgs, error: error, clearError: known);
 }
 
 /// State after a turn finishes: the placeholder becomes the final assistant
@@ -45,6 +71,7 @@ ChatState completedTurnState(
 }) {
   final msgs = List<ChatMessage>.from(from.messages);
   completeStreamingThinkingEntries(msgs);
+  clearSurfaceInteractions(msgs);
   setMessageStatus(msgs, userMsgId, MessageStatus.ok);
   final idx = msgs.indexWhere((m) => m.id == streamingPlaceholderId);
   if (idx != -1) {

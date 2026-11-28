@@ -173,7 +173,7 @@ void main() {
         tester.getSemantics(find.byKey(key)).flagsCollection.isSelected,
         isNot(Tristate.isTrue),
       );
-      expect(_iconColor(tester, key), scheme.onSurface.withValues(alpha: 0.6));
+      expect(_iconColor(tester, key), scheme.onSurfaceVariant);
     });
 
     testWidgets('danger tone uses the error colour', (tester) async {

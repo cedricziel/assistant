@@ -7,22 +7,57 @@ import '../../shared/platform/widgets.dart';
 import 'chat_provider.dart';
 import 'read_aloud_action.dart';
 
+/// Builds the widgets after the action buttons in [MessageActions.trailing].
+///
+/// [timing] comes first, so a later timing indicator (chat-a11y C11) prepends
+/// to the feedback buttons rather than competing for the slot. The feedback
+/// buttons appear only for a persisted final-answer assistant entry: a
+/// message timeline entry with non-empty content that is not streaming,
+/// failed or the unsaved `assistant-<timestamp>` fallback. Every other entry
+/// (user, tool call, thinking, subagent, command) gets no trailing widget.
+///
+/// [rating] is the caller's current vote and [onRatingChanged] receives the
+/// tapped rating, or `null` when the selected one is tapped again. Without a
+/// callback there is nothing to wire, so no buttons are built.
+List<Widget> buildMessageTrailing({
+  required ChatMessage message,
+  Widget? timing,
+  MessageRating? rating,
+  ValueChanged<MessageRating?>? onRatingChanged,
+}) => [
+  ?timing,
+  if (onRatingChanged != null && _showsFeedback(message))
+    FeedbackButtons(rating: rating, onChanged: onRatingChanged),
+];
+
+/// Whether [message] is a persisted final-answer assistant entry.
+bool _showsFeedback(ChatMessage message) =>
+    message.isAssistant &&
+    message.timelineType == TimelineEntryType.message &&
+    !message.isStreaming &&
+    message.status != MessageStatus.failed &&
+    message.content.trim().isNotEmpty &&
+    !message.id.startsWith('assistant-');
+
 /// Builds the action row shown below a message bubble.
 ///
 /// Decides which actions apply to [message] (Stop, Stopped, Read aloud, Copy,
 /// Share, Save, Retry; [isStopping] keeps Stop visible but disabled) and feeds
 /// them to [MessageActions]. The response timing indicator (only for finished
-/// replies that have a timing, and only while [showResponseTiming]) and
-/// [feedback] fill the trailing slot, in that order.
+/// replies that have a timing, and only while [showResponseTiming]) comes
+/// first in the trailing slot, then [feedback], then [trailing] from a composed
+/// builder such as [buildMessageTrailing].
 ///
 /// Branching: Edit ([onEdit]) is offered for persisted user messages and
 /// Regenerate ([onRegenerate]) for persisted assistant messages, only while no
 /// turn works ([turnWorking] is false while idle and while a turn only waits
 /// for the user). [onRegenerateWith] adds a model menu when [regenerateModels]
-/// has two or more entries. A message with `branch` gets a [BranchPicker] in
-/// the leading slot, wired to [onSwitchBranch] with the id of the sibling
-/// version to show; the picker is busy while [turnWorking]. All of these stay off until their callbacks are
-/// supplied.
+/// has two or more entries. A message with `branch`, or a user message whose
+/// reply has no visible row and carries `replyBranch`, gets a [BranchPicker]
+/// in the leading slot, wired to [onSwitchBranch] with the id of the sibling
+/// version to show; the picker is busy while [turnWorking], and its tooltip
+/// names the model when the reply was produced by a non-default one. All of
+/// these stay off until their callbacks are supplied.
 Widget buildMessageActions({
   required ChatMessage message,
   required ServerCapabilities capabilities,
@@ -33,6 +68,7 @@ Widget buildMessageActions({
   bool isStopping = false,
   bool showResponseTiming = false,
   Widget? feedback,
+  List<Widget> trailing = const [],
   bool isPersisted = false,
   bool turnWorking = false,
   VoidCallback? onEdit,
@@ -63,7 +99,9 @@ Widget buildMessageActions({
 
   final hasContent = message.content.isNotEmpty;
   final isFailed = message.status == MessageStatus.failed;
-  final branch = message.branch;
+  // The message's own versions take precedence; a user row carries
+  // `replyBranch` only when its active reply has no visible assistant row.
+  final branch = message.branch ?? message.replyBranch;
   final canBranch = isPersisted && !turnWorking;
   final showEdit = canBranch && isUser && onEdit != null;
   final showRegenerate = canBranch && !isUser && onRegenerate != null;
@@ -72,11 +110,19 @@ Widget buildMessageActions({
       !isUser &&
       onRegenerateWith != null &&
       regenerateModels.length >= 2;
+  final defaultModel = _defaultModel(regenerateModels);
+  final modelLabel =
+      isPersisted &&
+          !isUser &&
+          branch != null &&
+          message.model != null &&
+          message.model != defaultModel
+      ? message.model
+      : null;
 
   return Builder(
     builder: (context) {
-      final mutedColor = Theme.of(context).colorScheme.onSurface
-          .withValues(alpha: 0.6);
+      final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
 
       return MessageActions(
         alignment: alignment,
@@ -85,6 +131,7 @@ Widget buildMessageActions({
                 index: branch.index,
                 count: branch.count,
                 busy: turnWorking,
+                model: modelLabel,
                 onPrevious: () =>
                     onSwitchBranch(branch.siblingIds[branch.index - 1]),
                 onNext: () =>
@@ -190,6 +237,7 @@ Widget buildMessageActions({
         trailing: [
           if (timing != null) MessageTimingIndicator(timing: timing),
           ?feedback,
+          ...trailing,
         ],
       );
     },
@@ -199,4 +247,12 @@ Widget buildMessageActions({
 Rect? _origin(BuildContext context) {
   final box = context.findRenderObject() as RenderBox?;
   return box != null ? box.localToGlobal(Offset.zero) & box.size : null;
+}
+
+/// The org's default model, or null while the list is loading or failed.
+String? _defaultModel(List<RegenerateModel> models) {
+  for (final model in models) {
+    if (model.isDefault) return model.name;
+  }
+  return null;
 }

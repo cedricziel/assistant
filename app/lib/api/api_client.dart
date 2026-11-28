@@ -8,6 +8,7 @@ import 'dart:convert';
 
 import 'package:assistant_api/assistant_api.dart' hide ServerCapabilities;
 import 'package:assistant_ui/models.dart' show ApprovalDecision;
+import 'package:built_value/json_object.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:fresh_dio/fresh_dio.dart';
@@ -22,6 +23,7 @@ import 'event_source_stream_stub.dart'
 import 'models/interaction_answer.dart';
 import 'models/server_capabilities.dart';
 import 'models/stream_event.dart';
+import 'models/surface_action.dart';
 import 'native_http_adapter_stub.dart'
     if (dart.library.io) 'native_http_adapter_io.dart'
     as native_http_adapter;
@@ -173,6 +175,10 @@ class ApiClient {
   @visibleForTesting
   Dio get dioForTesting => _dio;
 
+  /// The underlying HTTP client, for callers that need raw requests (surface
+  /// attachment bytes) with the app's interceptors and headers.
+  Dio get dio => _dio;
+
   /// The Dio fresh_dio uses for refresh + retry. Tests inject the same
   /// HttpClientAdapter on both so retries see the mocked responses.
   @visibleForTesting
@@ -203,6 +209,7 @@ class ApiClient {
   WorkflowsApi get workflows => _generatedApi.getWorkflowsApi();
   CapabilitiesApi get capabilities => _generatedApi.getCapabilitiesApi();
   CommandsApi get commands => _generatedApi.getCommandsApi();
+  ModelsApi get models => _generatedApi.getModelsApi();
   OrgsApi get orgs => _generatedApi.getOrgsApi();
   SpacesApi get spaces => _generatedApi.getSpacesApi();
   MembersApi get members => _generatedApi.getMembersApi();
@@ -329,14 +336,23 @@ class ApiClient {
   /// [DoneEvent] when the server closes the stream. A rejected request yields
   /// a single [ErrorEvent] carrying the HTTP status (409 while an edit or
   /// regenerate holds the conversation).
+  ///
+  /// With [surfaceAction], this is the post-turn route for a surface the turn
+  /// that rendered it has left behind: the message is empty and the server
+  /// builds the visible user text. A 409 means the surface was already
+  /// submitted; a 410 means it is no longer answerable.
   Stream<StreamEvent> streamMessages(
     String conversationId,
     String message, {
     List<String>? attachmentIds,
+    SurfaceActionSubmission? surfaceAction,
   }) {
     final body = <String, dynamic>{'message': message};
     if (attachmentIds != null && attachmentIds.isNotEmpty) {
       body['attachment_ids'] = attachmentIds;
+    }
+    if (surfaceAction != null) {
+      body['surface_action'] = surfaceAction.toJson();
     }
     return _postSse('/api/conversations/$conversationId/messages', body);
   }
@@ -674,6 +690,22 @@ RespondToInteractionRequest _respondRequest(InteractionAnswer answer) =>
               ]),
           ),
         ),
+        SurfaceActionAnswer(:final action) => _RespondOneOf(
+          typeIndex: 2,
+          value: RespondToInteractionRequestOneOf2(
+            (r) => r
+              ..kind = RespondToInteractionRequestOneOf2KindEnum.surfaceAction
+              ..action = JsonObject({
+                'name': action.name,
+                'surfaceId': action.surfaceId,
+                'sourceComponentId': action.sourceComponentId,
+                'context': action.context,
+              })
+              ..dataModel = action.dataModel == null
+                  ? null
+                  : JsonObject(action.dataModel!),
+          ),
+        ),
         DeclineAnswer() => _RespondOneOf(
           typeIndex: 3,
           value: RespondToInteractionRequestOneOf3(
@@ -972,6 +1004,13 @@ Stream<StreamEvent> parseSseByteStream(Stream<List<int>> byteStream) async* {
           yield InteractionResolvedEvent.fromJson(json, sequenceId: seq);
         } catch (_) {
           // ignore malformed interaction_resolved events
+        }
+      } else if (eventType == 'surface_update' && dataLine != null) {
+        try {
+          final json = jsonDecode(dataLine) as Map<String, dynamic>;
+          yield SurfaceUpdateEvent.fromJson(json, sequenceId: seq);
+        } catch (_) {
+          // ignore malformed surface_update events
         }
       }
       eventType = null;

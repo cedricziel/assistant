@@ -282,43 +282,214 @@ There are no org-level fallback starters. A Persona without starters shows the
 default empty-chat copy; an admin who wants starters everywhere sets them on
 the org-owned Personas.
 
+### Rating replies
+
+Every finished assistant reply carries thumbs up and thumbs down in its action
+row. The buttons appear once the reply has content and a server-assigned id,
+so a streaming reply or one still on the client-only `assistant-<timestamp>`
+fallback has none. A reply the user already rated shows the matching thumb
+selected when the conversation loads.
+
+Choosing either thumb opens an optional comment field below the actions.
+Submitting sends the rating with the trimmed comment; dismissing keeps the
+rating without a comment. Choosing the other thumb sends the new rating
+without the old comment and reopens the field empty. Tapping the selected
+thumb clears the vote and closes the field.
+
+The app updates the selection immediately and reconciles with the server
+afterwards. A failed request rolls the reply back to the last confirmed vote
+and shows a snackbar. While requests for a reply are queued, its local vote
+wins over a history reload.
+
+Comment text stays in the space database. It is never exported to telemetry;
+the `gen_ai.evaluation.result` event only records whether a comment exists
+(`assistant.feedback.has_comment`). See
+[opentelemetry.md](opentelemetry.md) for the event and metric reference.
+
+### Editing, regenerating and branches
+
+A conversation is a tree. Editing one of your messages or regenerating a reply
+adds a **version** next to the original instead of replacing it, so the
+original and everything built on it stay stored. One version is active at a
+time, and the chat view, the model's history, `/status`, titling and indexing
+all follow that Active Path. The version switcher ("‹ 2/3 ›") appears in the
+message's action row for every message with siblings. When a reply has no text
+of its own, its switcher appears under the message that started it.
+
+**Edit** is offered on your persisted messages, with or without attachments.
+The bubble becomes an inline editor holding the current text. Attachments stay
+visible below the field and are read-only: an edit changes the text only, and
+the attachments carry forward to the new version while the original keeps them
+too. Send stays disabled while the text is blank or unchanged, and Escape
+cancels. Sending hides the messages after the edited one while the new reply
+streams, then reloads the conversation; the edited message then shows "2/2".
+
+**Regenerate** is offered on a persisted assistant reply. It answers the same
+user message again, without adding another user message, and makes the new
+reply the active version. A regenerate that fails before writing anything
+leaves the old reply in place. Stopping one mid-stream keeps what already
+streamed, or a short stopped placeholder when nothing did, as a stopped reply
+on the new branch.
+
+**Regenerate with another model** appears when more than one model is
+offered: the org's `[llm] model` plus at least one entry of `[llm]
+available_models` in `org.toml`. Any member with write access may pick one.
+The choice applies to that one reply and does not change the conversation's
+`/model` setting, so the next normal send uses the default again. When a
+message has versions and the active one came from a model other than the
+default, the version switcher's tooltip names it.
+
+**Switching versions** moves the Active Leaf. The server descends from the
+version you picked through the most recently created child at each fork, so a
+nested branch lands at its latest message. Switching does not reorder the
+conversation list. The branch you select stays active for everything that
+follows, including a message that arrives later from a messenger.
+
+**Conversations shared with messengers.** Conversations started in Slack,
+Matrix or Mattermost can be edited, regenerated and switched on the web. The
+messenger's next message continues the branch you selected, but an edit or a
+regenerate replies on the web only: nothing is posted back to the messenger
+thread. While a branch turn holds the conversation, a messenger message for it
+is deferred and retried afterwards. A web send in the same window is rejected
+with a conflict; the message is shown as failed and can be retried.
+
+**Waiting for the user.** Edit, Regenerate and the version switcher stay
+enabled while a turn waits for an approval, a question or a surface answer.
+Choosing one cancels that wait: the pending card resolves as cancelled, the
+gated tool does not run, and the branch being left ends with a stopped reply.
+A turn that is still working is not cancelled; the branch operation gets a
+conflict and the turn keeps running.
+
+**Retry.** Retry on a failed message first tries to resume its run. When the
+run cannot be resumed, a message with a server-assigned id is regenerated
+rather than sent again, so no duplicate user message is stored. If the run
+never persisted the message, Retry falls back to sending it; a failed edit is
+re-issued as an edit.
+
+**Compaction.** Context compaction records a summary of the earlier messages
+instead of deleting them. The model sees the summary plus the messages after
+it, while the conversation keeps every message and the timeline still shows
+them. A branch that diverged before the summary's last covered message does
+not inherit the summary.
+
+**In-flight guard.** The registry that reserves a conversation for a branch
+turn lives in one process. When several services share a database, or workers
+run in other processes, a branch operation does not see a turn running
+elsewhere. The database keeps the tree consistent, but a concurrent append can
+still land on the branch being left.
+
+### Response timing
+
+The app can show how long a reply took. It is **off by default**; turn it on
+per device under **Settings → Chat → Show response timing**. The switch is a
+local preference (`assistant.showResponseTiming` in local storage); it never
+reaches the server, so every browser and app install keeps its own setting.
+
+With the switch on, a finished reply that has timing shows a small speed icon in
+its action row. Hover, focus or activate it to see the numbers. They are
+measured by the orchestrator, not the browser:
+
+- **First token** — time from the start of the turn to the first streamed token.
+  Absent when the turn produced no streaming tokens.
+- **Total** — time from the start of the turn until the final answer was saved.
+- **tok/s** — output tokens divided by decode time. Decode time is the time
+  spent streaming tokens and excludes time spent in tool calls. tok/s is shown
+  only when the provider reported a token count and decoding took at least
+  250 ms.
+
+Some OpenAI-compatible providers omit usage for streamed responses unless
+`stream_options.include_usage` is set. Those replies still show first-token and
+total time but no tok/s. Timing is stored per message, so replies that predate
+the feature, older conversations and turns from Slack or Mattermost show none.
+Cancelled and failed turns have no timing either.
+
+### Accessibility
+
+The chat surface targets WCAG AA. A guideline suite
+(`app/test/widget/features/chat/chat_accessibility_test.dart`) pumps the chat
+screen with an attachment, a code block, a tool call, a thinking entry and an
+error banner in both themes, and asserts labelled tap targets, text contrast and
+a label on every tappable node.
+
+**Screen-reader announcements.** Turn lifecycle events are spoken through the
+platform accessibility channel; token frames never are:
+
+- a reply starts: "{Persona} is responding";
+- it finishes: "{Persona} replied: {excerpt}", where the excerpt is the reply
+  as plain text, cut to 200 characters at a word boundary and followed by "…"
+  when cut;
+- the user stops it: "Response stopped";
+- it fails: "Response failed: {message}", spoken immediately;
+- the turn goes quiet for a while: "Still working", at most once per turn, and
+  not while the turn waits for the user (for example a tool approval);
+- a code block is copied: "Code copied".
+
+A turn that is resumed after a dropped connection is announced the same way when
+its reply arrives. Opening a conversation's history is silent. Polite
+announcements are held for up to 1.5 seconds and a burst collapses to the latest
+one, so "Ada is responding" is skipped when the answer arrives immediately.
+The streaming bubble is not a live region, so TalkBack and VoiceOver do not
+re-read it on every token. The error banner is a live region.
+
+**Keyboard.** The composer follows visual order: attach, voice, input, then send
+or stop. Enter sends; Escape closes the slash-command menu. Timeline entry
+headers are focusable and toggle on Enter or Space, and a code block's copy
+button is reachable with Tab and activates with Enter or Space. The response
+timing indicator is a button too; focusing it opens its tooltip.
+
+**Reduced motion.** With the platform's reduce-motion setting on, the thread
+jumps instead of animating when it scrolls to the bottom, timeline entries
+resize without animating, the typing indicator is static, and the code block's
+"Copied" feedback appears in the next frame. Indeterminate progress indicators
+may keep animating because they convey status.
+
+**Layout.** Navigation switches at 768 px of window width. The chat pane splits
+into conversation list and messages only when the pane itself is at least
+768 px wide; otherwise the list lives in the drawer. With the navigation
+sidebar expanded, the list is in the drawer for windows up to 1008 px wide;
+with it collapsed, up to 840 px.
+
 ## REST API (`/api/*`)
 
 These endpoints power the Flutter app and are also consumable directly:
 
-| Route                                  | Method | Description                                               |
-| -------------------------------------- | ------ | --------------------------------------------------------- |
-| `/api/conversations`                   | GET    | List conversations (`?archived=true` lists archived ones) |
-| `/api/conversations`                   | POST   | Create conversation                                       |
-| `/api/conversations/stream`            | GET    | Stream conversation list changes (SSE)                    |
-| `/api/conversations/search`            | GET    | Search titles and message text (`?q=…&limit=…`)           |
-| `/api/conversations/{id}`              | GET    | Get conversation with messages                            |
-| `/api/conversations/{id}`              | PATCH  | Update title, pin or archive state                        |
-| `/api/conversations/{id}`              | DELETE | Delete conversation                                       |
-| `/api/conversations/{id}/messages`     | POST   | Send message (SSE streaming response)                     |
-| `/api/personas`                        | GET    | List personas                                             |
-| `/api/personas/active`                 | POST   | Switch active persona                                     |
-| `/api/personas/{id}`                   | PATCH  | Update a persona's starter prompts                        |
-| `/api/personas/{id}/skills`            | GET    | List skills for a persona                                 |
-| `/api/orgs`                            | GET    | List organizations (filtered by user access)              |
-| `/api/orgs`                            | POST   | Create organization                                       |
-| `/api/orgs/{id}`                       | GET    | Get organization details                                  |
-| `/api/orgs/{id}`                       | PATCH  | Update organization settings                              |
-| `/api/orgs/{org}/users`                | GET    | List users in org                                         |
-| `/api/orgs/{org}/users`                | POST   | Invite user to org                                        |
-| `/api/orgs/{org}/users/{uid}`          | GET    | Get user details                                          |
-| `/api/orgs/{org}/users/{uid}`          | PATCH  | Update user (name, role)                                  |
-| `/api/orgs/{org}/users/{uid}`          | DELETE | Remove user from org                                      |
-| `/api/orgs/{org}/spaces`               | GET    | List spaces (filtered by membership)                      |
-| `/api/orgs/{org}/spaces`               | POST   | Create space                                              |
-| `/api/orgs/{org}/spaces/{sid}`         | GET    | Get space details                                         |
-| `/api/orgs/{org}/spaces/{sid}`         | PATCH  | Update space                                              |
-| `/api/orgs/{org}/spaces/{sid}`         | DELETE | Delete space (org-admin only)                             |
-| `/api/orgs/{org}/spaces/{sid}/members` | GET    | List space members                                        |
-| `/api/orgs/{org}/spaces/{sid}/members` | POST   | Add user to space with role                               |
-| `/api/users/me/api-keys`               | GET    | List API keys (prefix + name, no secrets)                 |
-| `/api/users/me/api-keys`               | POST   | Create scoped API key (returns plaintext once)            |
-| `/api/users/me/api-keys/{kid}`         | DELETE | Revoke API key                                            |
+| Route                                                      | Method | Description                                               |
+| ---------------------------------------------------------- | ------ | --------------------------------------------------------- |
+| `/api/conversations`                                       | GET    | List conversations (`?archived=true` lists archived ones) |
+| `/api/conversations`                                       | POST   | Create conversation                                       |
+| `/api/conversations/stream`                                | GET    | Stream conversation list changes (SSE)                    |
+| `/api/conversations/search`                                | GET    | Search titles and message text (`?q=…&limit=…`)           |
+| `/api/conversations/{id}`                                  | GET    | Get conversation with messages                            |
+| `/api/conversations/{id}`                                  | PATCH  | Update title, pin or archive state                        |
+| `/api/conversations/{id}`                                  | DELETE | Delete conversation                                       |
+| `/api/conversations/{id}/messages`                         | POST   | Send message (SSE streaming response)                     |
+| `/api/conversations/{id}/messages/{message_id}/edit`       | POST   | Edit a user message and stream the new reply (SSE)        |
+| `/api/conversations/{id}/messages/{message_id}/regenerate` | POST   | Regenerate a reply, optionally with another model (SSE)   |
+| `/api/conversations/{id}/switch-branch`                    | POST   | Move the active branch to another version                 |
+| `/api/models`                                              | GET    | List the models available for regenerate                  |
+| `/api/personas`                                            | GET    | List personas                                             |
+| `/api/personas/active`                                     | POST   | Switch active persona                                     |
+| `/api/personas/{id}`                                       | PATCH  | Update a persona's starter prompts                        |
+| `/api/personas/{id}/skills`                                | GET    | List skills for a persona                                 |
+| `/api/orgs`                                                | GET    | List organizations (filtered by user access)              |
+| `/api/orgs`                                                | POST   | Create organization                                       |
+| `/api/orgs/{id}`                                           | GET    | Get organization details                                  |
+| `/api/orgs/{id}`                                           | PATCH  | Update organization settings                              |
+| `/api/orgs/{org}/users`                                    | GET    | List users in org                                         |
+| `/api/orgs/{org}/users`                                    | POST   | Invite user to org                                        |
+| `/api/orgs/{org}/users/{uid}`                              | GET    | Get user details                                          |
+| `/api/orgs/{org}/users/{uid}`                              | PATCH  | Update user (name, role)                                  |
+| `/api/orgs/{org}/users/{uid}`                              | DELETE | Remove user from org                                      |
+| `/api/orgs/{org}/spaces`                                   | GET    | List spaces (filtered by membership)                      |
+| `/api/orgs/{org}/spaces`                                   | POST   | Create space                                              |
+| `/api/orgs/{org}/spaces/{sid}`                             | GET    | Get space details                                         |
+| `/api/orgs/{org}/spaces/{sid}`                             | PATCH  | Update space                                              |
+| `/api/orgs/{org}/spaces/{sid}`                             | DELETE | Delete space (org-admin only)                             |
+| `/api/orgs/{org}/spaces/{sid}/members`                     | GET    | List space members                                        |
+| `/api/orgs/{org}/spaces/{sid}/members`                     | POST   | Add user to space with role                               |
+| `/api/users/me/api-keys`                                   | GET    | List API keys (prefix + name, no secrets)                 |
+| `/api/users/me/api-keys`                                   | POST   | Create scoped API key (returns plaintext once)            |
+| `/api/users/me/api-keys/{kid}`                             | DELETE | Revoke API key                                            |
 
 `PATCH /api/conversations/{id}` takes optional `title`, `pinned` and
 `archived` fields; at least one is required. A title is trimmed and limited to

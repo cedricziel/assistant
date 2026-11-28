@@ -9,6 +9,7 @@ import 'package:assistant_api/assistant_api.dart'
     hide ServerCapabilities;
 import 'package:assistant_app/api/api_client.dart';
 import 'package:assistant_app/api/models/stream_event.dart';
+import 'package:assistant_app/api/models/surface_action.dart';
 import 'package:assistant_app/features/chat/chat_provider.dart';
 import 'package:assistant_app/features/connection/connection_provider.dart';
 import 'package:built_collection/built_collection.dart';
@@ -137,6 +138,12 @@ class _FakeApi extends ApiClient {
 
   _FakeConversationsApi get conversationsFake => _conversationsFake;
 
+  @override
+  Future<List<api.InteractionDetail>> listConversationInteractions(
+    String conversationId, {
+    api.InteractionStatusView? status,
+  }) async => const [];
+
   final _sends = <StreamController<StreamEvent>>[];
   final _edits = <StreamController<StreamEvent>>[];
   final _regenerates = <StreamController<StreamEvent>>[];
@@ -191,6 +198,7 @@ class _FakeApi extends ApiClient {
     String conversationId,
     String message, {
     List<String>? attachmentIds,
+    SurfaceActionSubmission? surfaceAction,
   }) {
     sent.add(message);
     return _take(_sends);

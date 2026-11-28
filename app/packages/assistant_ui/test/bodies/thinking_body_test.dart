@@ -69,9 +69,8 @@ void main() {
       expect(taps, ['https://example.com/docs']);
     });
 
-    testWidgets('active stream applies no plugins or scope builders', (
-      tester,
-    ) async {
+    testWidgets('active stream applies no plugins or scope builders, but adds '
+        'the code-block builder', (tester) async {
       final controller = StreamController<String>();
       addTearDown(controller.close);
 
@@ -95,8 +94,29 @@ void main() {
         find.byType(StreamMarkdown),
       );
       expect(markdown.plugins, isNull);
-      expect(markdown.builderRegistry, isNull);
+      expect(markdown.builderRegistry!.entries.map((entry) => entry.key), [
+        'code_block',
+      ]);
       expect(find.text('test-mermaid'), findsNothing);
+    });
+
+    testWidgets('an active stream renders a code fence as a CodeBlock', (
+      tester,
+    ) async {
+      final controller = StreamController<String>();
+      addTearDown(controller.close);
+
+      await _pump(
+        tester,
+        ThinkingBody(
+          entryState: EntryState.active,
+          tokenStream: controller.stream,
+        ),
+      );
+      controller.add('```python\nprint(1)\n```');
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byType(CodeBlock), findsOneWidget);
     });
 
     testWidgets('complete renders bold markers literally as selectable text', (

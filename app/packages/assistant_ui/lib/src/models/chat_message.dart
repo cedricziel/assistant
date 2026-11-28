@@ -5,6 +5,7 @@ import 'interaction_record.dart';
 import 'mcp_app.dart';
 import 'message_rating.dart';
 import 'message_timing.dart';
+import 'surface_record.dart';
 
 // -- Chat messages -----------------------------------------------------------
 
@@ -158,6 +159,9 @@ class ChatMessage {
     this.parentId,
     this.branch,
     this.replyBranch,
+    this.model,
+    this.surface,
+    this.viaForm = false,
     List<ToolCallRecord>? toolCalls,
     List<ChatAttachment>? attachments,
   }) : toolCalls = toolCalls ?? [],
@@ -250,9 +254,22 @@ class ChatMessage {
   /// of that reply.
   final BranchInfo? replyBranch;
 
+  /// The model that produced this reply, when the server recorded it.
+  ///
+  /// The branch picker uses it to name a version produced by a model other
+  /// than the org default.
+  final String? model;
+
   /// The interaction a [TimelineEntryType.interaction] entry renders. Mutable
   /// like [content]; only set when the request had no tool call to attach to.
   InteractionRecord? interaction;
+
+  /// The surface a [TimelineEntryType.surface] entry renders.
+  final SurfaceRecord? surface;
+
+  /// This user message was built by the server for a surface action, not
+  /// typed by the user. The bubble says so.
+  final bool viaForm;
 
   /// The caller's feedback on this message, `null` when none.
   ///
@@ -284,6 +301,8 @@ class ChatMessage {
     MessageTiming? timing,
     MessageFeedback? feedback,
     bool clearFeedback = false,
+    SurfaceRecord? surface,
+    bool? viaForm,
   }) {
     return ChatMessage(
         id: id ?? this.id,
@@ -309,6 +328,9 @@ class ChatMessage {
         parentId: parentId,
         branch: branch,
         replyBranch: replyBranch,
+        model: model,
+        surface: surface ?? this.surface,
+        viaForm: viaForm ?? this.viaForm,
       )
       ..interaction = interaction
       ..feedback = clearFeedback ? null : (feedback ?? this.feedback);

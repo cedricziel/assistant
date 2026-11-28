@@ -1,6 +1,6 @@
 [package]
 name = "assistant-workflow-http"
-version = "0.3.1"
+version = "0.3.3"
 license.workspace = true
 edition.workspace = true
 description = "HTTP action node executor for assistant-workflow"

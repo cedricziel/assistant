@@ -1,7 +1,7 @@
 //! Tool approvals end to end (ADR-0017): the HTTP routes and the turn worker
 //! live in separate runtimes that share `space.db` and the bus, as the
-//! packaged install runs them. Approvals are switched on by the harness, not
-//! by `send_message`: web chat does not ask for approvals yet.
+//! packaged install runs them. The turns use the default web-chat policy, so
+//! they prove that `send_message` asks its owner.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -146,10 +146,7 @@ impl Harness {
             .turn_registry()
             .try_begin(self.conversation, run_id, TurnMode::Shared)
             .expect("no other turn holds the conversation");
-        // Web chat does not ask for approvals yet; the harness opts in.
-        let opts = RunOptions::web_turn(TurnAnchor::Append)
-            .with_user_message_id(Uuid::new_v4())
-            .with_interactive(true);
+        let opts = RunOptions::web_turn(TurnAnchor::Append).with_user_message_id(Uuid::new_v4());
         let turn = opts.submit_turn(
             text.to_string(),
             self.conversation,

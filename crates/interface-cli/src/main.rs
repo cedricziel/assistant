@@ -130,10 +130,12 @@ async fn main() -> Result<()> {
     let orchestrator_interface_filtered = matches!(cli.command, Some(Command::Orchestrator { .. }))
         && !orchestrator_interfaces.is_empty();
 
-    // 4. Prepare confirmation behavior before bootstrapping the stack.
+    // 4. Prepare the terminal prompt before bootstrapping the stack.
     //
-    //    Background modes use auto-deny confirmation (no terminal
-    //    interaction). REPL mode uses the interactive CLI confirmation.
+    //    Only a REPL has someone at the terminal, so only a REPL supplies the
+    //    CLI callback. Without one an undecided call still denies. The
+    //    bootstrap enables interactions besides, so an interactive web turn
+    //    asks its owner through the broker in every mode.
     //
     //    The binary role drives the infrastructure-worker plan, the single
     //    source of truth for which `main-worker` / `scheduler-worker` /

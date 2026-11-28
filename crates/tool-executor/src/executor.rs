@@ -78,6 +78,11 @@ impl ToolExecutor {
             Arc::new(CancelTaskHandler::new(storage.clone())),
             Arc::new(ListTasksHandler::new(storage.clone())),
             Arc::new(PlanUpdateHandler::new()),
+            // Generative UI
+            Arc::new(RenderSurfaceHandler::new(
+                Arc::new(storage.attachment_store()),
+                config.ui.clone().unwrap_or_default(),
+            )),
             // Subagent lifecycle
             Arc::new(AgentStatusHandler::new(storage.clone())),
         ];
@@ -707,6 +712,39 @@ mod tests {
             .collect();
 
         assert_eq!(flagged, ["rich"], "only the rich-client handler is flagged");
+    }
+
+    // -- register_builtins ---------------------------------------------------
+
+    #[tokio::test]
+    async fn register_builtins_includes_render_surface() {
+        let storage = Arc::new(
+            assistant_storage::StorageLayer::new_in_memory()
+                .await
+                .unwrap(),
+        );
+        let registry = Arc::new(SkillRegistry::new(storage.pool.clone()).await.unwrap());
+        let executor = ToolExecutor::new(
+            storage,
+            Arc::new(assistant_llm_provider::ScriptedLlmProvider::new()),
+            registry,
+            Arc::new(OrgConfig::default()),
+        );
+
+        let handler = executor
+            .handler("render-surface")
+            .expect("render-surface is a builtin");
+        assert!(
+            handler.requires_rich_client(),
+            "render-surface must be dropped outside interactive web turns"
+        );
+        assert!(
+            executor
+                .to_specs()
+                .iter()
+                .any(|s| s.name == "render-surface" && s.requires_rich_client),
+            "render-surface missing from the tool definitions"
+        );
     }
 
     // -- to_specs_filtered ---------------------------------------------------
