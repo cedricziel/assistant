@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.3](https://github.com/cedricziel/assistant/compare/v0.3.2...v0.3.3) (2026-11-28)
+
+
+### Features
+
+* **app:** answer in-turn surface interactions ([45de5b2](https://github.com/cedricziel/assistant/commit/45de5b205c79039e43f63da25304adee6cc52e84))
+* **app:** answer in-turn surface interactions ([ba6ba7e](https://github.com/cedricziel/assistant/commit/ba6ba7efdc601079a45b2fe20c2a156206071d6e))
+* **app:** edit, regenerate and branch picker in the chat timeline ([4093363](https://github.com/cedricziel/assistant/commit/409336392c39fb53e05718115f56a548b8d34d53))
+* **app:** post-turn surface actions ([90e3798](https://github.com/cedricziel/assistant/commit/90e379808229b991b12195cf4725c56d390493b3))
+* **app:** post-turn surface actions ([be4989a](https://github.com/cedricziel/assistant/commit/be4989a78f9b2d78bef76dbe0872c55b5d5fb9c7))
+* **app:** regenerate with another model ([6769c6f](https://github.com/cedricziel/assistant/commit/6769c6f0e7bd10ff70bbb7b4ced70e56dfb7823b))
+* **app:** regenerate with another model ([878381c](https://github.com/cedricziel/assistant/commit/878381cd041d73a6e939b3f650b9ae77deb70755))
+* **app:** stream surface_update into the live timeline ([08f128c](https://github.com/cedricziel/assistant/commit/08f128c52a063aa19b95398768f9b462825a8699))
+* **app:** stream surface_update into the live timeline ([81d79b9](https://github.com/cedricziel/assistant/commit/81d79b98f10f31602453cf7483575f008ca351bf))
+* **app:** surfaces in conversation history ([011e0c7](https://github.com/cedricziel/assistant/commit/011e0c71a9026aa73433d3a6324ccdfc36687f01))
+* **app:** surfaces in conversation history ([636f98e](https://github.com/cedricziel/assistant/commit/636f98ebc1a0735d74a54ce207b1f9fbc4402162))
+* **cli,web-ui:** enable tool approvals and questions in web chat ([8bcd127](https://github.com/cedricziel/assistant/commit/8bcd127cc559933ed24377dbbedbbf29420e479f))
+* **cli,web-ui:** enable tool approvals and questions in web chat ([ce5f24b](https://github.com/cedricziel/assistant/commit/ce5f24bee0c68d5806def4c054dfb7061cee57a9))
+* **tool-executor:** register render-surface and advertise it on web ([2b9e9fd](https://github.com/cedricziel/assistant/commit/2b9e9fd6954635579be46e3f89c444effe37d407))
+* **tool-executor:** register render-surface and advertise it on web ([c8ac10b](https://github.com/cedricziel/assistant/commit/c8ac10bee7886d780cfb375ea57adcffb10dfcde))
+
+
+### Bug Fixes
+
+* **ci:** install Rust targets for iOS and macOS release builds ([c17bb9f](https://github.com/cedricziel/assistant/commit/c17bb9fc2d5573ea20d380a1b3b57da68db189d9))
+* **ci:** install Rust targets for iOS and macOS release builds ([af5f5b2](https://github.com/cedricziel/assistant/commit/af5f5b2b8e8f3af44a4d4263c86a75bc6422271e))
+
 ## [0.3.2](https://github.com/cedricziel/assistant/compare/v0.3.1...v0.3.2) (2026-11-27)
 
 
