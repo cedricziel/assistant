@@ -3,17 +3,18 @@
 ### Requirement: Owners answer through one respond endpoint
 
 The server SHALL expose
-`POST /api/conversations/{id}/turns/{run_id}/interactions/{interaction_id}/respond`
+`POST /api/conversations/{conversation_id}/turns/{turn_id}/interactions/{interaction_id}/respond`
 (`operationId: respond_to_interaction`) taking a `RespondToInteractionRequest`
-tagged by `kind` (`tool_approval`, `question`, `surface_action`, or `decline`).
-The `surface_action` variant SHALL carry `action` (an A2UI v1.0 action object)
-and an optional `data_model` object, and SHALL be accepted only for
-interactions of kind `surface_action`. Each kind's body SHALL be validated by
-that kind's registered interaction-kind handler. It SHALL return `200` with an
-`InteractionDetail`. It SHALL require `Access::Write` in the selected space,
-the `conversations:write` scope, ownership of the conversation, and that the
-interaction's recorded `user_id`, `conversation_id` and `run_id` match the
-caller and the path. All errors SHALL use the `{"error": …}` envelope.
+tagged by `kind` (`tool_approval`, `question`, `surface_action`, or `decline`),
+with unknown fields rejected. The `surface_action` variant SHALL carry `action`
+(an A2UI v1.0 action object) and an optional `data_model` object, and SHALL be
+accepted only for interactions of kind `surface_action`. It SHALL validate the
+answer through the handler registered for the interaction's kind. It SHALL
+return `200` with an `InteractionDetail`. It SHALL require `Access::Write` in
+the selected space, the `conversations:write` scope, ownership of the
+conversation, and that the interaction's recorded `user_id`, `conversation_id`
+and `run_id` match the caller and the path. Every error, including conversation
+lookup failures, SHALL use the `{"error": …}` envelope.
 
 #### Scenario: Owner answers
 
@@ -24,7 +25,8 @@ caller and the path. All errors SHALL use the `{"error": …}` envelope.
 #### Scenario: Another member cannot answer
 
 - **WHEN** a different member of the same space posts to the endpoint
-- **THEN** the response SHALL be `404` AND the interaction SHALL stay pending
+- **THEN** the response SHALL be `404` with an `{"error": …}` body AND the
+  interaction SHALL stay pending
 
 #### Scenario: Viewer is refused
 
@@ -33,7 +35,7 @@ caller and the path. All errors SHALL use the `{"error": …}` envelope.
 
 #### Scenario: Wrong run in the path
 
-- **WHEN** the `run_id` in the path differs from the interaction's run
+- **WHEN** the `turn_id` in the path differs from the interaction's run
 - **THEN** the response SHALL be `404`
 
 #### Scenario: Answer does not fit the kind
@@ -42,6 +44,16 @@ caller and the path. All errors SHALL use the `{"error": …}` envelope.
   request did not contain, or a `tool_approval` decision is not among the
   offered `options`
 - **THEN** the response SHALL be `400`
+
+#### Scenario: Oversized answer
+
+- **WHEN** a free-text answer is longer than 4000 characters
+- **THEN** the response SHALL be `400`
+
+#### Scenario: Oversized body
+
+- **WHEN** the request body is larger than 64 KiB
+- **THEN** the response SHALL be `413`
 
 #### Scenario: Surface action answer
 
