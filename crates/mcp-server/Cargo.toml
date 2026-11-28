@@ -1,6 +1,6 @@
 [package]
 name = "assistant-mcp-server"
-version = "0.3.3"
+version = "0.3.4"
 license.workspace = true
 edition.workspace = true
 description = "MCP server library exposing assistant tools and skills through rmcp"
