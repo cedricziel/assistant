@@ -47,6 +47,12 @@ Response body:
 - **WHEN** a client issues the status request
 - **THEN** the response SHALL be `200 OK` with `state: "completed"` and `last_event_kind: "suggestions"`
 
+#### Scenario: An errored turn with a later row stays errored
+
+- **GIVEN** a turn whose log holds `agent_error` followed by another row
+- **WHEN** a client issues the status request
+- **THEN** the response SHALL be `200 OK` with `state: "errored"`
+
 #### Scenario: An errored turn returns state=errored
 
 - **WHEN** a turn terminated with `agent_error`
