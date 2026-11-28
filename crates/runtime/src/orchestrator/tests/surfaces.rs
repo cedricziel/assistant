@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use assistant_core::types::agent::OrgConfig;
 use assistant_core::types::conversation::{Interface, MessageRole, TurnIdentity};
-use assistant_core::types::features::UiConfig;
 use assistant_core::{
     LlmProvider, LlmResponse, LlmResponseMeta, MessageBus, ToolCallItem, ToolCallResponse,
 };
@@ -17,7 +16,6 @@ use assistant_storage::{
     registry::SkillRegistry,
 };
 use assistant_tool_executor::ToolExecutor;
-use assistant_tool_executor::builtins::RenderSurfaceHandler;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -153,12 +151,6 @@ impl Harness {
             registry.clone(),
             Arc::new(config.clone()),
         ));
-        // Registered in this test's executor only: production registers it
-        // once the clients that render surfaces have shipped.
-        executor.register_ambient_tool(Arc::new(RenderSurfaceHandler::new(
-            Arc::new(storage.attachment_store()),
-            UiConfig::default(),
-        )));
         let bus: Arc<dyn MessageBus> = Arc::new(storage.message_bus());
         let surfaces = Arc::new(InMemorySurfaceStore::new());
         let interactions = Arc::new(InMemoryInteractionStore::new());
