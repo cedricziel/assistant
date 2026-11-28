@@ -1,7 +1,8 @@
 # conversation-branching Specification
 
 ## Purpose
-TBD - created by archiving change message-branching. Update Purpose after archive.
+
+The server side of conversation branching: messages form a tree with a per-conversation active leaf, compaction no longer deletes messages, turns are anchored and idempotent under redelivery, one orchestrator-owned registry tracks in-flight turns, and the edit, regenerate, switch-branch and models endpoints serve the chat clients.
 
 ## Requirements
 

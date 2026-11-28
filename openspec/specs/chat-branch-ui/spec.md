@@ -1,7 +1,8 @@
 # chat-branch-ui Specification
 
 ## Purpose
-TBD - created by archiving change message-branching. Update Purpose after archive.
+
+The Flutter side of conversation branching: the branch picker, inline message editor and regenerate menu elements, the branch actions in the chat timeline, edit and regenerate streaming, branch-aware history, retry and the model menu.
 
 ## Requirements
 
