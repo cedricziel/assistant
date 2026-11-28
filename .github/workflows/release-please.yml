@@ -233,6 +233,9 @@ jobs:
         run: |
           rustup show
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          # The Flutter build hook runs cargo from the pub cache, where rustup
+          # falls back to the runner default toolchain; pin the repository one.
+          echo "RUSTUP_TOOLCHAIN=$(rustup show active-toolchain | awk '{print $1}')" >> "$GITHUB_ENV"
 
       - name: Install protoc (macOS)
         run: brew install protobuf
